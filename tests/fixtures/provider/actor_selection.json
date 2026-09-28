@@ -1,0 +1,14 @@
+{
+  "selected_actor": "{actor_id}",
+  "reason": "The named participant acts next.",
+  "prose": "The detective answers the witness.",
+  "actions": [],
+  "new_events": [
+    {
+      "event_type": "character_spoke",
+      "text": "You are not going anywhere yet."
+    }
+  ],
+  "state_changes": [],
+  "open_commitments": []
+}

@@ -1,0 +1,247 @@
+{
+  "failure_count": 0,
+  "generated_at": "2026-09-28T16:25:59.542172+00:00",
+  "passed": true,
+  "scenario_count": 8,
+  "scenarios": [
+    {
+      "checks": [
+        {
+          "detail": "0 plan rows created for a possessed turn",
+          "key": "no_plan_row",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "lane_direct_actor",
+          "passed": true
+        }
+      ],
+      "key": "A",
+      "notes": [],
+      "passed": true,
+      "rule": "Lanes 1 and 2 propose nothing",
+      "title": "No plan for work the user already did"
+    },
+    {
+      "checks": [
+        {
+          "detail": "plan asserted excluded outcome: []",
+          "key": "no_envelope_violation",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "turn_produced",
+          "passed": true
+        }
+      ],
+      "key": "B",
+      "notes": [],
+      "passed": true,
+      "rule": "ai_directed may fill in anything except what the user excluded",
+      "title": "Exclusions bind under maximum authority"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "requires_approval",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "no_generation",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "no_prose",
+          "passed": true
+        },
+        {
+          "detail": "0 -> 0",
+          "key": "no_new_generation_row",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "plan_is_proposal",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "cannot_execute_unapproved",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "performs_after_approval",
+          "passed": true
+        }
+      ],
+      "key": "C",
+      "notes": [],
+      "passed": true,
+      "rule": "No generation before approval",
+      "title": "Strict authority holds the turn"
+    },
+    {
+      "checks": [
+        {
+          "detail": "retained intent was rewritten",
+          "key": "intent_unchanged",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "objective_changed",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "edit_re_proposes",
+          "passed": true
+        },
+        {
+          "detail": "the persisted intent row diverged from the proposal",
+          "key": "stored_intent_unchanged",
+          "passed": true
+        }
+      ],
+      "key": "D",
+      "notes": [],
+      "passed": true,
+      "rule": "intent_json is immutable under edit",
+      "title": "Plan edits never rewrite intent"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "no_generation",
+          "passed": true
+        },
+        {
+          "detail": "1 commitments",
+          "key": "commitment_created",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "commitment_is_open",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "plan_completed",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "user_told_it_is_recorded",
+          "passed": true
+        },
+        {
+          "detail": "Recorded as a long-term commitment rather than performed now: Eventually, the General will betray the Emperor. It will surface as foreshadowing until it happens or is cancelled.",
+          "key": "framed_as_pending",
+          "passed": true
+        },
+        {
+          "detail": "the long-horizon outcome was committed as a narrative event",
+          "key": "no_narrative_event_for_the_outcome",
+          "passed": true
+        }
+      ],
+      "key": "E",
+      "notes": [],
+      "passed": true,
+      "rule": "A commitment, never a generation",
+      "title": "Long-horizon intent is recorded, not performed"
+    },
+    {
+      "checks": [
+        {
+          "detail": "1 intent rows",
+          "key": "single_intent",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "constraints_retained",
+          "passed": true
+        }
+      ],
+      "key": "F",
+      "notes": [],
+      "passed": true,
+      "rule": "intent rows are not duplicated per restatement",
+      "title": "One request, one retained intent"
+    },
+    {
+      "checks": [
+        {
+          "detail": "the provider was never called",
+          "key": "prompt_built",
+          "passed": true
+        },
+        {
+          "detail": "a private fact reached a model prompt",
+          "key": "secret_not_in_any_prompt",
+          "passed": true
+        },
+        {
+          "detail": "the Performer prompt never reached the model",
+          "key": "performer_prompt_rendered",
+          "passed": true
+        },
+        {
+          "detail": "the participant cast did not reach the prompt",
+          "key": "cast_is_scoped_to_the_scene",
+          "passed": true
+        },
+        {
+          "detail": "the acting character was not given its own knowledge",
+          "key": "viewer_knowledge_present",
+          "passed": true
+        }
+      ],
+      "key": "G",
+      "notes": [
+        "the secret was knowledge, not suspicion; expecting redaction"
+      ],
+      "passed": true,
+      "rule": "No character is shown another's knowledge",
+      "title": "Performer briefs are viewer-scoped"
+    },
+    {
+      "checks": [
+        {
+          "detail": "{'invalidated'}",
+          "key": "beats_invalidated",
+          "passed": true
+        },
+        {
+          "detail": "cancelled",
+          "key": "plan_closed",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "interruption_recorded",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "no_reperformance",
+          "passed": true
+        }
+      ],
+      "key": "H",
+      "notes": [],
+      "passed": true,
+      "rule": "Beats invalidate; the plan closes",
+      "title": "Interruption is a clean terminal state"
+    }
+  ]
+}

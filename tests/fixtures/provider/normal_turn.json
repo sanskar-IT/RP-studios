@@ -1,0 +1,14 @@
+{
+  "selected_actor": "",
+  "reason": "The witness has the most immediate agency.",
+  "prose": "The witness moves from the library toward the hallway.",
+  "actions": [],
+  "new_events": [
+    {
+      "event_type": "character_moved",
+      "location_id": "hallway"
+    }
+  ],
+  "state_changes": [],
+  "open_commitments": []
+}

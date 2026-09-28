@@ -1,0 +1,13 @@
+{
+  "selected_actor": "",
+  "reason": "The witness looks away.",
+  "prose": "The room goes quiet.",
+  "actions": [],
+  "new_events": [
+    {
+      "event_type": "character_moved"
+    }
+  ],
+  "state_changes": [],
+  "open_commitments": []
+}

@@ -1,0 +1,14 @@
+{
+  "selected_actor": "",
+  "reason": "The witness reveals what they know.",
+  "prose": "The witness reveals the locked eastern door.",
+  "actions": [],
+  "new_events": [
+    {
+      "event_type": "knowledge_acquired",
+      "fact": "the eastern door is locked"
+    }
+  ],
+  "state_changes": [],
+  "open_commitments": []
+}

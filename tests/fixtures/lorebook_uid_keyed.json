@@ -1,0 +1,17 @@
+{
+  "name": "UID keyed archive",
+  "entries": {
+    "0": {
+      "keys": ["archive"],
+      "content": "The archive is below the eastern wing.",
+      "order": 5,
+      "selective": false
+    },
+    "1": {
+      "keys": ["index"],
+      "content": "The index changes when read aloud.",
+      "order": 6,
+      "selective": false
+    }
+  }
+}

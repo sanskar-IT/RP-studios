@@ -1,0 +1,14 @@
+{
+  "name": "Malformed optional metadata",
+  "scan_depth": "not-a-number",
+  "token_budget": null,
+  "entries": [
+    {
+      "keys": "archive",
+      "content": "The archive is still present.",
+      "order": "not-a-number",
+      "probability": "not-a-number",
+      "unknown_field": {"preserved": true}
+    }
+  ]
+}

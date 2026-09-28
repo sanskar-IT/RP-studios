@@ -1,0 +1,45 @@
+{
+  "name": "Public Safety World",
+  "description": "A representative Tavern-style world info book.",
+  "scan_depth": 3,
+  "token_budget": 900,
+  "recursive_scanning": true,
+  "entries": [
+    {
+      "uid": 0,
+      "key": ["Public Safety", "Public Safety Commission"],
+      "keysecondary": ["authority", "commission"],
+      "comment": "Public Safety",
+      "content": "Public Safety Commission officers carry sealed identification cards.",
+      "constant": false,
+      "selective": true,
+      "order": 20,
+      "position": 0,
+      "enabled": true,
+      "probability": 1.0,
+      "extensions": {"fixture_source": "tavern-like"}
+    },
+    {
+      "uid": 1,
+      "key": ["Makima"],
+      "comment": "Makima",
+      "content": "Makima controls the Public Safety Commission.",
+      "constant": false,
+      "selective": false,
+      "order": 10,
+      "position": 1,
+      "enabled": true,
+      "probability": 1.0
+    },
+    {
+      "uid": 2,
+      "key": ["always"],
+      "comment": "Constant world rule",
+      "content": "The city uses a strict chain of command.",
+      "constant": true,
+      "selective": false,
+      "order": 30,
+      "enabled": true
+    }
+  ]
+}

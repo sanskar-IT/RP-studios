@@ -1,0 +1,355 @@
+{
+  "failure_count": 0,
+  "generated_at": "2026-09-28T16:26:00.460316+00:00",
+  "passed": true,
+  "scenario_count": 10,
+  "scenarios": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "turn_committed",
+          "passed": true
+        },
+        {
+          "detail": "1 movement events",
+          "key": "one_event",
+          "passed": true
+        },
+        {
+          "detail": "the projection does not match the event the prose described",
+          "key": "state_matches_prose",
+          "passed": true
+        },
+        {
+          "detail": "the event was not attributed to the character who moved",
+          "key": "event_attributed_to_the_actor",
+          "passed": true
+        },
+        {
+          "detail": "no performer trace block was recorded",
+          "key": "trace_present",
+          "passed": true
+        },
+        {
+          "detail": "the trace does not record which actors were in the scene",
+          "key": "trace_has_actor_set",
+          "passed": true
+        }
+      ],
+      "key": "A",
+      "notes": [],
+      "passed": true,
+      "rule": "prose and committed state agree",
+      "title": "Single-character scene"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "turn_committed",
+          "passed": true
+        },
+        {
+          "detail": "6 speech events",
+          "key": "all_three_spoke",
+          "passed": true
+        },
+        {
+          "detail": "missing speakers: []",
+          "key": "per_speaker_attribution",
+          "passed": true
+        },
+        {
+          "detail": "an event's indexed actor disagrees with the character who spoke",
+          "key": "indexed_actor_matches_speaker",
+          "passed": true
+        },
+        {
+          "detail": "a character voiced a fact only one of them knew",
+          "key": "secret_not_spoken",
+          "passed": true
+        },
+        {
+          "detail": "hearing the suspect's denial taught the detective the secret",
+          "key": "suspicion_not_promoted",
+          "passed": true
+        },
+        {
+          "detail": "the trace does not record each actor's knowledge scope",
+          "key": "knowledge_scope_recorded",
+          "passed": true
+        }
+      ],
+      "key": "B",
+      "notes": [],
+      "passed": true,
+      "rule": "each actor speaks within their own knowledge",
+      "title": "Multi-character dialogue"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "turn_committed",
+          "passed": true
+        },
+        {
+          "detail": "the witness's line was recorded under the detective",
+          "key": "witness_speech_not_attributed_to_the_detective",
+          "passed": true
+        },
+        {
+          "detail": "the possessed character's own action was not recorded as a user action",
+          "key": "user_action_is_authoritative",
+          "passed": true
+        },
+        {
+          "detail": "nobody else reacted; a possessed scene must not go silent",
+          "key": "world_reacts",
+          "passed": true
+        },
+        {
+          "detail": "the Performer invented a major decision for the user",
+          "key": "no_invented_accusation",
+          "passed": true
+        },
+        {
+          "detail": "the trace does not record that the character's agency was withheld",
+          "key": "agency_withheld_recorded",
+          "passed": true
+        }
+      ],
+      "key": "C",
+      "notes": [],
+      "passed": true,
+      "rule": "no major decision is invented for the user's character",
+      "title": "User possession"
+    },
+    {
+      "checks": [
+        {
+          "detail": "3 characters reacted",
+          "key": "all_three_reacted",
+          "passed": true
+        },
+        {
+          "detail": "two characters were given the same reaction",
+          "key": "reactions_are_distinct",
+          "passed": true
+        },
+        {
+          "detail": "the character with a suspicion did not act on it",
+          "key": "suspicion_informed_the_detective",
+          "passed": true
+        },
+        {
+          "detail": "an uninformed character acted on knowledge they do not have",
+          "key": "uninformed_character_did_not_confess",
+          "passed": true
+        }
+      ],
+      "key": "D",
+      "notes": [],
+      "passed": true,
+      "rule": "reactions differ per character, derived from their own state",
+      "title": "Character agency"
+    },
+    {
+      "checks": [
+        {
+          "detail": "executing",
+          "key": "plan_running",
+          "passed": true
+        },
+        {
+          "detail": "2 beats",
+          "key": "plan_is_multi_beat",
+          "passed": true
+        },
+        {
+          "detail": "the plan was executing after the user intervened",
+          "key": "plan_survived",
+          "passed": true
+        },
+        {
+          "detail": "no beat was marked skipped",
+          "key": "a_beat_was_skipped",
+          "passed": true
+        },
+        {
+          "detail": "the interruption discarded the whole plan",
+          "key": "not_everything_invalidated",
+          "passed": true
+        },
+        {
+          "detail": "the interruption was not recorded on the plan",
+          "key": "interruption_recorded",
+          "passed": true
+        }
+      ],
+      "key": "E",
+      "notes": [
+        "beats before: [{'description': 'Make the situation around: Build toward the confrontation slowly, keeping the tension high', 'status': 'completed', 'participants': ['2f10df74-6f2a-4a67-abad-d3b16dd9b235', '595e7a9c-9075-4cea-845b-481c4a9313e2', '6b108105-e92b-4626-8dea-46cc443d67f6'], 'required': True, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}, {'description': 'Leave an unresolved thread the next turn can pick up', 'status': 'pending', 'participants': [], 'required': False, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}]"
+      ],
+      "passed": true,
+      "rule": "user action skips the active beat, plan continues",
+      "title": "Interrupted plan"
+    },
+    {
+      "checks": [
+        {
+          "detail": "the beat's required consequence was not persisted",
+          "key": "requirement_persisted",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "requirement_met",
+          "passed": true
+        },
+        {
+          "detail": "the trace does not record the requirement being satisfied",
+          "key": "satisfaction_recorded",
+          "passed": true
+        }
+      ],
+      "key": "F",
+      "notes": [],
+      "passed": true,
+      "rule": "a beat requirement is met, or the turn is rejected",
+      "title": "Required consequence"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "plan_proposed",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "turn_committed",
+          "passed": true
+        },
+        {
+          "detail": "an unchosen optional consequence became a committed event",
+          "key": "no_unchosen_commitment",
+          "passed": true
+        },
+        {
+          "detail": "the user's exclusion was violated by the committed state",
+          "key": "exclusion_respected",
+          "passed": true
+        }
+      ],
+      "key": "G",
+      "notes": [],
+      "passed": true,
+      "rule": "unchosen options are not recorded as commitments",
+      "title": "Optional consequence"
+    },
+    {
+      "checks": [
+        {
+          "detail": "the turn was accepted",
+          "key": "unavailable_actor_turn_refused",
+          "passed": true
+        },
+        {
+          "detail": "a dead or off-stage character reached the timeline",
+          "key": "nothing_committed",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "available_actor_permitted",
+          "passed": true
+        },
+        {
+          "detail": "the off-stage character was given to the Performer",
+          "key": "offstage_never_in_prompt",
+          "passed": true
+        }
+      ],
+      "key": "H",
+      "notes": [],
+      "passed": true,
+      "rule": "only available scene characters may act",
+      "title": "Dead and off-stage characters"
+    },
+    {
+      "checks": [
+        {
+          "detail": "the provider was never called",
+          "key": "prompt_recorded",
+          "passed": true
+        },
+        {
+          "detail": "",
+          "key": "secret_absent",
+          "passed": true
+        },
+        {
+          "detail": "the Performer prompt never reached the model",
+          "key": "performer_prompt_present",
+          "passed": true
+        },
+        {
+          "detail": "the acting character was not given the fact it legitimately knows",
+          "key": "viewer_gets_own_knowledge",
+          "passed": true
+        },
+        {
+          "detail": "a non-viewer's private fact reached the prompt",
+          "key": "other_knowledge_redacted",
+          "passed": true
+        },
+        {
+          "detail": "a non-participant character was given to the Performer",
+          "key": "cast_is_limited_to_participants",
+          "passed": true
+        }
+      ],
+      "key": "I",
+      "notes": [],
+      "passed": true,
+      "rule": "no character's private fact reaches another's prompt",
+      "title": "Knowledge isolation"
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "key": "branch_turn_committed",
+          "passed": true
+        },
+        {
+          "detail": "the parent timeline did not record its own action",
+          "key": "parent_has_its_own_action",
+          "passed": true
+        },
+        {
+          "detail": "the branch did not record its own action",
+          "key": "branch_has_its_own_action",
+          "passed": true
+        },
+        {
+          "detail": "an action leaked between branches",
+          "key": "no_cross_timeline_leak",
+          "passed": true
+        },
+        {
+          "detail": "the branch inherited state it was never given",
+          "key": "branch_does_not_inherit_the_later_beat",
+          "passed": true
+        }
+      ],
+      "key": "J",
+      "notes": [],
+      "passed": true,
+      "rule": "divergent state stays isolated between branches",
+      "title": "Branch execution"
+    }
+  ]
+}

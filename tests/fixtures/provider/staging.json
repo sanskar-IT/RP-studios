@@ -1,0 +1,10 @@
+{
+  "location": "library",
+  "time": "night",
+  "characters_present": ["{actor_name}"],
+  "objective": "Stage a suspicious murder and the panic it causes.",
+  "initial_conditions": ["The library is closed for the night."],
+  "environmental_assumptions": ["The killer is still inside."],
+  "potential_consequences": ["Other characters may panic."],
+  "canon_conflicts": []
+}

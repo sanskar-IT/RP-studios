@@ -1,0 +1,14 @@
+[
+  {
+    "keys": ["Makima"],
+    "content": "Makima is present in the control room.",
+    "order": 10,
+    "selective": false
+  },
+  {
+    "keys": ["Denji"],
+    "content": "Denji is trying not to attract attention.",
+    "order": 20,
+    "selective": false
+  }
+]

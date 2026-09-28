@@ -1,0 +1,13 @@
+{
+  "selected_actor": "{actor_id}",
+  "reason": "The fatal branch event is explicit.",
+  "prose": "The detective does not survive the branch.",
+  "actions": [],
+  "new_events": [
+    {
+      "event_type": "character_died"
+    }
+  ],
+  "state_changes": [],
+  "open_commitments": []
+}
