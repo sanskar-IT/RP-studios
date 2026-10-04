@@ -447,6 +447,13 @@ remain open.
    only by accident.
 8. **`actions` and `open_commitments` are dead fields** — required by the schema,
    consumed by nothing.
+9. **The declared event enum disagreed with the engine.** The schema advertised
+   `item_obtained`, `item_destroyed`, `character_injured`, and `scene_ended`, none
+   of which appear in `KNOWN_EVENT_TYPES`. Because validation is all-or-nothing, a
+   model that used a declared name lost the whole turn. Both schemas now derive the
+   enum from `MODEL_WRITABLE_EVENT_TYPES`, which also stops advertising
+   `world_fact_created` — inviting the model to publish a private belief as canon.
+   See `tests/test_event_vocabulary.py`.
 9. **Actor selection is a six-branch cascade with two nondeterministic
    orderings** and no dead-character check.
 10. **Actorless narration is unreachable** from `continue_scene`; environment has
@@ -541,6 +548,33 @@ not do with them, and `check_user_agency` enforces it: a **decision** or a **lin
 for a possessed character is refused, while an `observation` or `reaction` is
 allowed. That last distinction matters — blocking every action would make
 possession produce a scene where the user's character does nothing at all.
+
+**2a. That distinction was enforced by a field the model fills in.** The check read
+`turn.kind == "decision"`, so it was a request rather than a guarantee: the same
+action refused as `decision` was accepted as `reaction`, and then committed as an
+authoritative `user_action` for a character the user owns. `kind` cannot be the
+basis of the check, because the model chooses it.
+
+Enforcement is now *grounding*: an action for a possessed character is refused when
+its distinctive words do not appear in the user's own `user_input`. That input is
+the only statement of intent the model did not author, which makes it the trust
+boundary. The test is deliberately weak in the permissive direction — any
+substantial overlap passes, and short connective actions are excused — so the
+failure mode it accepts is an action the user did not quite ask for rather than a
+silent takeover. The alternative, refusing everything unprompted, would break the
+case possession exists for ("I open the drawer" → "steadies the drawer with one
+hand").
+
+The cost is real and worth watching in dogfooding: a legitimate-sounding connective
+the model adds unprompted will be refused. The turn is discarded and retried rather
+than committed, so it is recoverable.
+
+**2b. The check read `actor_actions` only.** `proposed_events` and `state_claims`
+were never examined, so a turn with no `actor_actions` for the possessed character
+passed unexamined while its claims named that character directly — the engine would
+apply state on the user's character's behalf with no check performed at all. Both
+are now covered: any possessed `character_id` or `entity_id` in either is a
+violation.
 
 **3. Two possession mechanisms (finding 4).** `_resolve_control_modes` is now the
 single view. A per-call `possessed_character_id` is authoritative for that call and

@@ -24,6 +24,34 @@ Unknown top-level, nested, and book-entry extension fields are retained in exten
 
 Malformed JSON, missing names, oversized files, excessive JSON depth, too many book entries, invalid embedded metadata, and unsupported file types return a typed import error. Malformed individual book entries are skipped with warnings so valid entries remain importable. Standalone lorebooks accept Tavern-style top-level arrays and UID-keyed entry objects.
 
+### Compressed metadata is bounded on output, not just input
+
+`zTXt` and `iTXt` chunks with the compression flag are inflated during parsing, and
+that inflation is entirely attacker-controlled: a PNG chunk's length, flag, and
+payload are all supplied by the upload. `MAX_IMPORT_BYTES` bounds the uploaded file
+and therefore cannot bound this — the bytes that matter are the ones it expands to.
+
+`zlib.decompress` allocates whatever the stream claims. Measured on the original
+implementation: 4.1 KiB of input reached 13 MiB peak, 16 KiB reached 52 MiB.
+
+`_bounded_inflate` feeds the stream in 64 KiB slices with a `max_length` ceiling of
+4 MiB, so a bomb is abandoned at the overshoot rather than after being expanded. The
+ceiling sits well above `MAX_TEXT_LENGTH` (200 000 characters), which is the limit
+the imported text is then held to, so a real card is never caught by it.
+
+Both call sites keep their own error idiom: a rejected `iTXt` chunk is skipped, a
+rejected `zTXt` chunk sets its text to `None`, and in both cases a lower-priority
+valid chunk is still used.
+
+Truncated compressed data is refused as well. `decompressobj` does not raise on an
+incomplete stream — it returns whatever decompressed before the cut, which for a
+card payload can still be valid JSON. Without the `eof` check, a half-written card
+imported as a real one, silently and permanently.
+
+`test_a_compression_bomb_is_rejected_without_being_materialised` builds a 64 MiB
+payload that compresses to under 256 KiB and asserts it is refused; a companion test
+confirms a large legitimate compressed card still imports.
+
 ## Fixtures and tests
 
 `tests/fixtures/character_v1.json`, `character_v2.json`, `character_v1.png`, `character_v2.png`, and `character_v2.apng` cover legacy fields, optional fields, alternate greetings, embedded books, arbitrary extensions, PNG precedence, compressed metadata, and APNG detection. `lorebook_tavern.json`, `lorebook_array.json`, `lorebook_uid_keyed.json`, and `lorebook_malformed_optional.json` cover real-world book shapes and safe optional-field handling. Tests also cover round-trip normalization, bounded imports, lore activation, and API previews.

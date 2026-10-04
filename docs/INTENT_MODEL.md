@@ -60,6 +60,20 @@ the user wanted without them.
 `ambiguous` is different. It is a warning, not a wall: the Director may proceed,
 and the plan it produces should be the more conservative reading.
 
+This paragraph used to describe the intent without the code implementing it.
+`requires_approval` gated on `consistency != "consistent"`, so `ambiguous` halted
+the turn — and because `_REFERENT` marks *any* pronoun as ambiguous, ordinary
+sentences were halted with it: "I follow her down the hall", "I look at it", "I
+hand the letter to him" all produced an empty turn and an approval prompt at every
+authority level, including the default `director_assisted`. A scene with two
+characters could not be played in ordinary language.
+
+The gate is now on `CONTRADICTORY` only. The classifier is unchanged, and
+ambiguity still does its job: it discounts plan confidence and biases the
+Performer toward the conservative reading. `test_a_pronoun_still_marks_the_intent_
+ambiguous` in `tests/test_director_pipeline.py` guards against "fixing" this by
+deleting the rule instead of the wall.
+
 ## Lanes
 
 `services/director/router.py` assigns exactly one lane, deterministically,

@@ -24,6 +24,42 @@ The current repository contains the MVP foundation and first complete narrative 
 - Canon divergence records
 - Desktop-first React studio with cast, performance, state, timeline, and director controls
 
+## Verification Status
+
+Last full run on the `fix/p0-dogfood-blockers` branch. Every number below was
+produced by the commands in [Testing and Quality Checks](#testing-and-quality-checks).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Python suite | `pytest` | 263 passed, 12 skipped |
+| Migrations | `pytest tests/test_migrations.py` | 8 passed |
+| Engine evaluation | `python -m services.evaluation.harness` | pass, 0 invalid events, 0 knowledge leaks, 0 branch leaks, all six invariants true |
+| Director evaluation | `python -m services.evaluation.director` | 8/8 scenarios |
+| Performer evaluation | `python -m services.evaluation.performer` | 10/10 scenarios |
+| Lint | `ruff check apps services packages tests` | clean |
+| Types | `mypy apps services packages` | clean, 56 files |
+| Web types and build | `npm run web:lint`, `npm run web:build` | clean |
+
+These suites assert behaviour against scripted providers. **Passing them is not
+a claim that the prose is good** — that still needs a human reading the output.
+
+There is no JavaScript test runner. Frontend behaviour is covered by server
+contract tests plus type checking and a successful build, so UI regressions are
+verified manually rather than automatically.
+
+### Known limitations
+
+| Limitation | Status |
+| --- | --- |
+| `_recent_events` renders speech to every character within the context window, and `_overhear` grants no suspicion for a paraphrase | **Open.** `test_recent_events_still_expose_speech_within_the_window` asserts the leak still exists, so the gap stays visible until it is closed deliberately |
+| No authentication; Compose binds all interfaces and publishes PostgreSQL on `5432` | Open. Bind to loopback before any shared deployment — see [Security Before Publishing](#security-before-publishing) |
+| Unbounded request body size; uploads spool to disk before the 413 | Open |
+| `creator_notes` and card text reach prompts without a trust boundary; over-long card descriptions are rejected rather than truncated | Open. Needs a trust-boundary design, not a patch |
+| Context budget can starve character state, and trims the knowledge guardrail it still describes as exhaustive | Open |
+| Performer output is never validated against the Director constraint envelope; exclusions are prompt-only | Open |
+| `active_director_plan` has no timeline predicate after a fork | Open |
+| No CI workflow | Open |
+
 ## Product Model
 
 The application keeps these distinctions separate:
@@ -192,6 +228,10 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
+Until a provider key is configured, the studio displays a banner stating that
+responses are templated rather than written. This is expected on a fresh
+installation.
+
 The API reads environment variables with the `NARRATIVE_` prefix. The important settings are:
 
 | Variable | Purpose | Default |
@@ -281,7 +321,7 @@ Do not commit a real API key. `.env` and common local secret formats are ignored
 5. Review the inferred location, time, participants, objective, assumptions, consequences, and canon conflicts.
 6. Accept the staging proposal. A staged scene cannot continue until this approval boundary is recorded.
 7. Use the staging controls to edit, regenerate, or cancel the proposal before approval.
-8. Continue the scene in `Auto`, `Actor`, or `Narrator` mode. The engine chooses a participant or honors the explicit actor override.
+8. Continue the scene in `Auto`, `Actor`, or `Narrator` mode. The engine chooses a participant or honors the explicit actor override. Submitting with an empty input in these modes is valid and advances the scene without authoring a line.
 9. Use `Director` mode for a high-level commitment. It does not immediately force the requested outcome.
 10. Use `World` or `Retcon` mode for explicit world changes or accepted canon divergence.
 11. Use `Possess` to temporarily take control of any scene participant. The next turn is user-authored even without resending a possession ID.
@@ -324,7 +364,7 @@ Narrative endpoints are under `/api`; health and interactive documentation are s
 | `POST` | `/api/projects/{project_id}/timelines/{timeline_id}/commitments/{commitment_id}` | Move a commitment through its lifecycle |
 | `POST` | `/api/projects/{project_id}/timelines/{timeline_id}/commitments/{commitment_id}/supersede` | Retire a commitment, optionally replacing it |
 | `POST` | `/api/projects/{project_id}/timelines/{timeline_id}/correct-state` | Apply an operator correction to a world fact |
-| `GET` | `/api/providers/capabilities` | Read the configured provider's context window and features |
+| `GET` | `/api/providers/capabilities` | Read the configured provider's `adapter`, context window, and features. `adapter: "heuristic"` means no model is configured |
 | `GET` | `/api/projects/{project_id}/characters/{character_id}` | Retrieve a character definition and preserved card metadata |
 | `GET` | `/api/projects/{project_id}/lorebooks` | List imported books and entry counts |
 | `POST` | `/api/projects/{project_id}/lorebooks/{lorebook_id}/associate` | Associate a project book with a character |
@@ -339,6 +379,13 @@ The API does not return provider credentials. The frontend only receives narrati
 ## State and Timeline Guarantees
 
 Narrative changes are append-only events. A timeline node stores a complete checkpoint so loading the latest state does not require replaying the entire history.
+
+Every event type a model is asked to propose must be one the engine accepts. The
+schemas derive their enum from `MODEL_WRITABLE_EVENT_TYPES` rather than carrying
+hand-written lists, because a disagreement between the two is silent until a turn
+is rejected wholesale. Events outside that set — scene lifecycle, possession,
+forks, `world_fact_created` — are engine-originated and are not advertised to the
+model. See `tests/test_event_vocabulary.py`.
 
 Branching never edits the source timeline:
 
@@ -362,7 +409,14 @@ The importer supports:
 - Optional and legacy field variations
 - Arbitrary extension data
 
-Unknown fields and unsupported V2 entry metadata are preserved and reported as warnings. Imports are size, depth, and entry bounded. The import UI previews a validated file before confirmation.
+Unknown fields and unsupported V2 entry metadata are preserved and reported as warnings. Imports are bounded on upload size, entry count, and nesting depth.
+
+Compressed PNG metadata is additionally bounded on the *decompressed* size, because
+`zTXt` and `iTXt` chunks expand by a ratio the uploaded byte count cannot express. A
+card whose text chunk expands beyond 4 MiB is rejected rather than inflated, and a
+truncated compressed chunk is refused instead of being decoded to whatever survived.
+
+The import UI previews a validated file before confirmation.
 
 Fixtures live in `tests/fixtures/`. Compatibility tests cover V1, V2, alternate greetings, embedded books, arbitrary extensions, PNG/APNG metadata, Tavern-style book shapes, bounded imports, round-trip normalization, and lore activation.
 
@@ -384,6 +438,15 @@ and character. Scope (`world`, `character`, `scene`, `transient`) is stored
 separately from class and decides whose prompt a memory may enter. A character
 does not automatically know a fact merely because the source material or model
 contains it, and suspicion is stored apart from certainty.
+
+Derived character state does not retain speech content. `last_action` records
+*that* a character spoke without keeping the words, because state is re-projected
+from the event log indefinitely: storing the text there made a single quiet
+utterance reappear in other characters' prompts on every later turn. Observable
+performed actions are kept verbatim, since anything in the room can witness one.
+
+This closes the permanent half of the leak. In-window exposure remains — see
+[Known limitations](#known-limitations).
 
 ## Database and Migrations
 
@@ -516,6 +579,62 @@ The opt-in suite requires `NARRATIVE_TEST_DATABASE_URL` and skips otherwise:
 
 The suite skips when the variable is unset or the database is unreachable, and it leaves no test data behind. See `docs/DEPLOYMENT.md` for the full procedure.
 
+## Recent Changes
+
+### P0 dogfood blockers
+
+Seven defects found by external validation, each reproduced with a failing
+regression test before being fixed.
+
+**Event vocabulary.** The Performer schema advertised `item_obtained`,
+`item_destroyed`, `character_injured`, and `scene_ended` — none of which the
+engine accepts. Because claim validation is all-or-nothing, a schema-compliant
+model producing one of those names lost the entire turn, including the prose:
+picking up a locket could not be committed. Both schemas now derive their enum
+from a single `MODEL_WRITABLE_EVENT_TYPES` allowlist, which also stops
+advertising `world_fact_created` (a private belief promoted to canon for every
+viewer). The three names already in the wild are normalised on read, so a model
+carrying a cached prompt degrades instead of returning a 422.
+
+**Approval gate.** `requires_approval` gated on any consistency other than
+`consistent`, so an ordinary pronoun — `_REFERENT` marks "I follow her down the
+hall" ambiguous — returned an empty turn and an approval prompt at *every*
+authority level, including the default `director_assisted`. A scene with two
+characters could not be played with ordinary sentences. Only
+`CONTRADICTORY` now gates; ambiguity still discounts plan confidence. This is
+what `docs/INTENT_MODEL.md` already promised.
+
+**Unbounded zlib.** PNG text chunks were inflated with `zlib.decompress`, which
+has no size ceiling: roughly 16 KiB of upload reached 52 MiB of memory before
+the importer's own limit, and that limit only bounds the *uploaded* file. Replaced
+with a chunked inflate that abandons a bomb at the ceiling. Truncated compressed
+data is now refused too — `decompressobj` otherwise decodes whatever survived, and
+that can still be valid JSON, so a half-written card would import as a real one.
+
+**`last_action` persistence.** Raw speech was written into character state, then
+re-projected into every later snapshot and re-inserted into every subsequent
+prompt. A single secret spoken quietly to one person became a permanent,
+undetectable leak into every other character's context on every following turn.
+Speech events now store a content-free label. Observable performed actions are
+kept, because continuity depends on them and dropping them buys no isolation.
+
+**Possession enforcement.** `check_user_agency` decided whether the Performer
+had taken over the user's character by reading `turn.kind` — a field the model
+fills in. Relabelling a decision as `reaction` bypassed the check and committed
+an invented decision as an authoritative `user_action` for a character the user
+owns. Authority is now never derived from `kind`; enforcement is grounding in the
+user's own input, the one statement of intent the model did not author. The check
+also now covers `proposed_events` and `state_claims`, which named possessed
+characters directly while going unchecked entirely.
+
+**Provider warning.** Nothing told the user that no model was configured, so a
+fresh install looked like a working app that was silently echoing input back. The
+studio now reads the existing `adapter` field and says so.
+
+**Continue with no input.** The client refused to send an empty command, so the
+one control whose purpose is to advance the scene without writing anything did
+nothing. The engine already handled it correctly; only the guard was wrong.
+
 ## Security Before Publishing
 
 Before pushing a public or shared repository:
@@ -592,12 +711,31 @@ Do not commit until the staged diff has been reviewed.
 
 ### 5. Add a remote and push
 
-Replace the placeholder with the remote URL supplied by the hosting service:
+Replace the placeholder with the remote URL supplied by the hosting service. Note
+the branch name: this repository uses `master`, so a fresh publish needs no
+rename.
 
 ```text
 git remote add origin <your-repository-url>
-git branch -M main
-git push -u origin main
+git push -u origin master
+```
+
+Current state of this repository:
+
+```text
+origin   https://github.com/sanskar-IT/RP-studios.git
+branch   master            f672eff  feat: establish narrative studio engine
+         fix/p0-dogfood-blockers   429122d  fix: clear the P0 dogfood blockers
+```
+
+`master` and `origin/master` both point at `f672eff`; the P0 work exists only on
+`fix/p0-dogfood-blockers`, which is not yet on the remote. Merge it with a fast
+forward once the review is done:
+
+```text
+git checkout master
+git merge --ff-only fix/p0-dogfood-blockers
+git push origin master
 ```
 
 For an existing repository, inspect the remote and history before pushing:
@@ -638,6 +776,10 @@ Run `git status --short` and `git check-ignore -v <path>`. A `.gitignore` rule o
 ## Current Scope
 
 The MVP intentionally does not include image generation, video, voice, social networking, a public marketplace, hosted inference, multi-user collaboration, a mobile app, training pipelines, or custom model hosting. These can be considered only after the narrative state and branching model are stable.
+
+Authentication is also out of scope for the MVP. The application is designed as a
+single-user self-hosted desk. It should not be exposed to a network you do not
+control until it has authentication and a reverse proxy in front of it.
 
 ## License
 

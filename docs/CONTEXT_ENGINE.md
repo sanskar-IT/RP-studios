@@ -292,6 +292,44 @@ character. The memory retriever drops memories owned by another character. The
 lore scanner reads the turn's own language, not the memory payload, so that
 retrieving more memory cannot silently activate more lore.
 
+### 2.3.1 Persisted state holds no speech content
+
+`apply_event` records a `last_action` for the four action-bearing event types, and
+that field is re-projected into every subsequent state snapshot and inserted into
+every character's brief. For `character_spoke`, `user_action`, and `ai_action` it
+therefore stores a content-free label (`"spoke"`, `"acted"`) rather than the text.
+
+This is a knowledge-isolation measure, not a compression choice. Retaining the words
+made a one-turn leak permanent: a secret spoken quietly to one person was re-read
+into other characters' prompts indefinitely, with no suspicion recorded and nothing
+in the transcript to explain why they knew. The event log still holds the
+utterance — it is the record of what happened — but nothing derived from it carries
+the content forward.
+
+`character_performed_action` keeps its text. Anything in the room can witness a
+visible act, so there is no isolation to be gained by dropping it, and continuity
+("where did the locket go?") depends on it.
+
+### 2.3.2 In-window exposure is still open
+
+The permanent leak above is closed. The in-window one is not.
+
+`_recent_events` renders the text of the last few events to every character in the
+scene regardless of who was present, and `_overhear` records no suspicion when the
+claim is a paraphrase rather than the verbatim fact. A bystander prompted later in
+the same scene therefore still sees the line, and their knowledge contains nothing
+explaining it.
+
+The principled fix is to make `_overhear` fail *open* toward suspicion. That is a
+design change with its own cost: suspicion growth is already unbounded, so
+defaulting to suspicion increases how fast that budget is consumed. It is deferred
+rather than half-applied.
+
+`test_recent_events_still_expose_speech_within_the_window`
+(`tests/test_knowledge_isolation.py`) asserts the leak is *present*, so the gap
+stays visible and the test fails loudly if someone closes it without recording the
+change.
+
 ## 2.4 Validation and contradictions
 
 Generated prose and claimed state changes are extracted separately
