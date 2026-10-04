@@ -453,6 +453,153 @@ async def test_the_selected_style_reaches_the_prompt(session, cast):
 # --- Trace -----------------------------------------------------------------
 
 
+# --- Possession: the model does not get to grant itself authority -----------
+
+
+@pytest.mark.asyncio
+async def test_a_major_decision_relabelled_as_a_reaction_is_still_refused(session, cast):
+    """Relabelling must not defeat the agency check.
+
+    ``check_user_agency`` read ``turn.kind == "decision"`` to decide whether the
+    Performer had taken over the user's character. ``kind`` is a field the model
+    fills in, so the check was a request rather than a guarantee: the same action
+    that is refused as ``decision`` is accepted as ``reaction`` and then committed
+    as an authoritative ``user_action`` for a character the user owns.
+
+    The user's own input is the only trustworthy statement of intent, so
+    grounding in that is what the check now tests.
+    """
+    project, people, scene = cast(control="detective")
+    detective = people["Detective"]
+    pipeline = NarrativePipeline(
+        session,
+        ScriptedProvider(
+            [
+                performer_turn(
+                    prose="The detective looks around the archive.",
+                    actor_actions=[
+                        {
+                            "character_id": detective.id,
+                            "action": "signs away the estate to the suspect",
+                            "kind": "reaction",
+                        }
+                    ],
+                )
+            ]
+        ),
+    )
+    # A contract violation is the refusal mechanism: the proposal is discarded
+    # and the turn is not committed.
+    with pytest.raises(ValueError) as raised:
+        await pipeline.continue_scene(
+            project_id=project.id,
+            scene_id=scene.id,
+            possessed_character_id=detective.id,
+            user_input="I look around the archive.",
+        )
+    assert "major decision" in str(raised.value)
+    committed = [
+        event
+        for event in repository.list_events(session, project.active_timeline_id)
+        if "estate" in json.dumps(event.payload)
+    ]
+    assert not committed, "the invented decision was committed to the timeline"
+
+
+@pytest.mark.asyncio
+async def test_a_grounded_action_for_the_users_character_is_allowed(session, cast):
+    """The check must not refuse the user the actions they actually chose.
+
+    Grounding is a permissive test, not a blunt one: the action has to overlap
+    the user's own input. This is the connective case possession exists for.
+    """
+    project, people, scene = cast(control="detective")
+    detective = people["Detective"]
+    pipeline = NarrativePipeline(
+        session,
+        ScriptedProvider(
+            [
+                performer_turn(
+                    prose="The detective draws the drawer open.",
+                    actor_actions=[
+                        {
+                            "character_id": detective.id,
+                            "action": "draws the drawer open",
+                            "kind": "decision",
+                        }
+                    ],
+                )
+            ]
+        ),
+    )
+    result = await pipeline.continue_scene(
+        project_id=project.id,
+        scene_id=scene.id,
+        possessed_character_id=detective.id,
+        user_input="I open the drawer.",
+    )
+    trace = ((result.director or {}).get("performer")) or {}
+    codes = {violation["code"] for violation in trace.get("violations") or []}
+    assert "user_agency_violation" not in codes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["proposed_events", "state_claims"])
+async def test_a_possessed_id_in_a_claim_is_refused(session, cast, field):
+    """Possession must be enforced on claims, not only on described action.
+
+    ``check_user_agency`` looked at ``result.actor_actions`` and nothing else, so
+    a turn with no actor actions for the possessed character passed — while
+    ``proposed_events`` and ``state_claims`` named them directly. The engine
+    would then apply state on the user's character's behalf with no check
+    performed at all.
+    """
+    from services.performer.performer import (
+        PerformerRequest,
+        PerformerResult,
+        check_user_agency,
+    )
+
+    project, people, scene = cast(control="detective")
+    detective = people["Detective"]
+
+    class _Brief:
+        character_id = detective.id
+        name = "Detective"
+        agency_withheld = True
+
+    request = PerformerRequest(
+        scene_id=scene.id,
+        user_input="I look around.",
+        actors=[_Brief()],
+    )
+    claims = {
+        "proposed_events": [
+            {
+                "event_type": "character_performed_action",
+                "character_id": detective.id,
+                "action": "signs away the estate",
+            }
+        ],
+        "state_claims": [
+            {
+                "entity_id": detective.id,
+                "field": "location_id",
+                "value": "attic",
+            }
+        ],
+    }
+    result = PerformerResult(
+        prose="Nothing happens.",
+        proposed_events=claims["proposed_events"] if field == "proposed_events" else [],
+        state_claims=claims["state_claims"] if field == "state_claims" else [],
+    )
+    violations = check_user_agency(result, request=request)
+    assert any(v.code == "user_agency_violation" for v in violations), (
+        f"a possessed character_id in {field} was not checked"
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_trace_records_the_performers_decisions(session, cast):
     project, people, scene = cast(control="detective")

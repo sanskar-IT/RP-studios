@@ -378,3 +378,13 @@ export interface OpenCommitment {
   priority: number;
   progress: number;
 }
+
+/**
+ * What the engine is actually wired to. `adapter: "heuristic"` means no model is
+ * configured and responses are templated, not written.
+ */
+export interface ProviderCapabilities {
+  adapter: string;
+  context_window: number;
+  supports_structured_output: boolean;
+}

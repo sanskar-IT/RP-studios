@@ -196,3 +196,21 @@ def test_provider_capabilities_route_reports_a_window() -> None:
     assert body["context_window"] >= 512
     assert body["supports_structured_output"] in {True, False}
     assert "api_key" not in response.text.casefold()
+
+
+def test_provider_capabilities_route_makes_the_unconfigured_adapter_detectable() -> None:
+    """The client needs one field to tell the user no model is configured.
+
+    With no key set the adapter is ``heuristic``, which echoes the user's input
+    back with no model involved. Nothing in the response previously said so, and
+    the frontend never asked, so a fresh install looked like a working app that
+    was silently incapable of writing prose.
+    """
+    from fastapi.testclient import TestClient as RawClient
+
+    raw = RawClient(app)
+    body = raw.get("/api/providers/capabilities").json()
+    assert "adapter" in body
+    assert body["adapter"] in {"heuristic", "openai_compatible"}
+    if body["adapter"] == "heuristic":
+        assert body["supports_structured_output"] in {True, False}

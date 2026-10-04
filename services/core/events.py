@@ -68,6 +68,50 @@ KNOWN_EVENT_TYPES = frozenset(
     }
 )
 
+# The event types a model is allowed to *propose*.
+#
+# This is a subset of ``KNOWN_EVENT_TYPES``, and it exists because the two sets
+# answer different questions. ``KNOWN_EVENT_TYPES`` is what the engine can
+# apply — it includes events only the engine or an operator may originate
+# (scene lifecycle, possession, forks, world-fact publication). Advertising those
+# to the Performer invites it to do things it has no authority to do, and the
+# worst of them is ``world_fact_created``, which converts one character's private
+# belief into canon that is then rendered to everyone as true.
+#
+# The Performer is a narrator of the room, not the author of the world.
+MODEL_WRITABLE_EVENT_TYPES: tuple[str, ...] = (
+    CHARACTER_MOVED,
+    CHARACTER_SPOKE,
+    CHARACTER_PERFORMED_ACTION,
+    RELATIONSHIP_CHANGED,
+    KNOWLEDGE_ACQUIRED,
+    KNOWLEDGE_SUSPECTED,
+    KNOWLEDGE_REFUTED,
+    ITEM_ACQUIRED,
+    ITEM_REMOVED,
+    INJURY_ADDED,
+    INJURY_REMOVED,
+    LOCATION_CHANGED,
+)
+
+# Event names the Performer has been told to use that the engine never accepted.
+#
+# These shipped in the Phase C schema before the enum was derived from
+# ``KNOWN_EVENT_TYPES``. A model with that prompt in its context will keep
+# emitting them, and the turn is all-or-nothing, so rejecting them outright turns
+# a naming mistake into a lost scene. Normalising is the difference between a
+# character picking up a locket and the whole turn failing as a 422.
+EVENT_TYPE_ALIASES: dict[str, str] = {
+    "item_obtained": ITEM_ACQUIRED,
+    "item_destroyed": ITEM_REMOVED,
+    "character_injured": INJURY_ADDED,
+}
+
+
+def canonical_event_type(event_type: str) -> str:
+    """Resolve an event name to the one the engine applies."""
+    return EVENT_TYPE_ALIASES.get(event_type, event_type)
+
 
 _REQUIRED_EVENT_FIELDS: dict[str, tuple[tuple[str, ...], ...]] = {
     CHARACTER_MOVED: (("character_id",), ("location_id",)),

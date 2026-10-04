@@ -1,6 +1,6 @@
 {
   "failure_count": 0,
-  "generated_at": "2026-09-28T16:26:00.460316+00:00",
+  "generated_at": "2026-09-28T18:41:05.868510+00:00",
   "passed": true,
   "scenario_count": 10,
   "scenarios": [
@@ -190,7 +190,7 @@
       ],
       "key": "E",
       "notes": [
-        "beats before: [{'description': 'Make the situation around: Build toward the confrontation slowly, keeping the tension high', 'status': 'completed', 'participants': ['2f10df74-6f2a-4a67-abad-d3b16dd9b235', '595e7a9c-9075-4cea-845b-481c4a9313e2', '6b108105-e92b-4626-8dea-46cc443d67f6'], 'required': True, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}, {'description': 'Leave an unresolved thread the next turn can pick up', 'status': 'pending', 'participants': [], 'required': False, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}]"
+        "beats before: [{'description': 'Make the situation around: Build toward the confrontation slowly, keeping the tension high', 'status': 'completed', 'participants': ['d4a62f20-7303-40e9-a454-ab4fab902de0', 'b7748ada-966e-458f-946b-c68b31a35848', '31b13f06-d3d0-4ab7-ba16-76a8cadb5021'], 'required': True, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}, {'description': 'Leave an unresolved thread the next turn can pick up', 'status': 'pending', 'participants': [], 'required': False, 'guidance': True, 'requires_knowledge': '', 'note': '', 'required_consequences': []}]"
       ],
       "passed": true,
       "rule": "user action skips the active beat, plan continues",

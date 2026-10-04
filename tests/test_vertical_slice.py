@@ -137,6 +137,42 @@ async def test_full_narrative_loop_creates_events_state_memory_checkpoint_and_fo
 
 
 @pytest.mark.asyncio
+async def test_an_empty_continue_advances_the_beat(session):
+    """Continue with no text is a legitimate turn, and the engine runs it.
+
+    The Continue button is the "let the scene keep going" control: the user is
+    asking the engine to advance without speaking. The client refused to send an
+    empty command, so the button did nothing at all — the one interaction that
+    exists purely to avoid writing a line of dialogue had no effect.
+
+    This pins the server contract the client depends on. The client-side guard
+    is what was wrong; the engine was already correct.
+    """
+    project, characters, scene = create_project_scene(session, ["Detective", "Witness"])
+    detective, _witness = characters
+    pipeline = NarrativePipeline(session, fixture_provider("staging.json"))
+    await pipeline.stage(
+        project_id=project.id,
+        premise="Two people wait",
+        scene_id=scene.id,
+        character_ids=[character.id for character in characters],
+    )
+    pipeline.approve_scene(project_id=project.id, scene_id=scene.id)
+
+    result = await NarrativePipeline(
+        session, fixture_provider("normal_turn.json")
+    ).continue_scene(
+        project_id=project.id,
+        scene_id=scene.id,
+        actor_character_id=detective.id,
+        user_input="",
+    )
+    assert result.generation_id is not None
+    assert result.output_text
+    assert not result.requires_approval
+
+
+@pytest.mark.asyncio
 async def test_commitment_survives_unrelated_turns_and_enters_planner_context(session):
     project, characters, scene = create_project_scene(session, ["General", "Emperor"])
     general, _emperor = characters

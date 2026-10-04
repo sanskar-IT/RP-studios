@@ -56,6 +56,73 @@ def test_png_chunk_precedence_prefers_ccv2_over_chara():
     assert extracted["data"]["name"] == "V2"
 
 
+def test_a_compression_bomb_is_rejected_without_being_materialised():
+    """A few KB of PNG must not be able to allocate hundreds of MB.
+
+    ``zlib.decompress`` has no size ceiling, so a card whose compressed text
+    chunk expands to gigabytes exhausts memory inside the parser — before the
+    importer's own byte limit, which only bounds the *uploaded* file. Measured on
+    the original code: 4.1 KiB of input reached 13 MiB peak, 16 KiB reached
+    52 MiB.
+
+    The bound is on the decompressed text, and it is enforced incrementally, so
+    a bomb is abandoned mid-stream rather than after being fully expanded.
+    """
+    bomb = zlib.compress(b"A" * (64 * 1024 * 1024))
+    assert len(bomb) < 256 * 1024, "bomb fixture should be small to compress well"
+
+    card = {"name": "Bomb"}
+    for chunk_type, payload in (
+        (b"zTXt", b"ccv2\x00\x00" + bomb),
+        (b"iTXt", b"ccv2\x00\x01\x00\x00\x00" + bomb),
+    ):
+        bomb_only = b"\x89PNG\r\n\x1a\n" + chunk(chunk_type, payload) + chunk(b"IEND", b"")
+        with pytest.raises(CardImportError):
+            import_character_card(bomb_only, "bomb.png")
+
+        # With a legitimate lower-priority chunk present, the bomb chunk is
+        # skipped and the real card still imports.
+        fallback = (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(chunk_type, payload)
+            + chunk(b"tEXt", b"chara\x00" + base64.b64encode(json.dumps(card).encode()))
+            + chunk(b"IEND", b"")
+        )
+        assert import_character_card(fallback, "bomb.png").name == "Bomb"
+
+
+def test_bounded_inflate_stops_at_the_ceiling_and_keeps_normal_text():
+    from services.importers.character_cards import (
+        MAX_DECOMPRESSED_TEXT_BYTES,
+        _bounded_inflate,
+    )
+
+    assert _bounded_inflate(zlib.compress(b"hello")) == b"hello"
+    with pytest.raises(ValueError):
+        _bounded_inflate(zlib.compress(b"A" * (MAX_DECOMPRESSED_TEXT_BYTES + 1)))
+
+
+def test_bounded_inflate_rejects_truncated_streams():
+    from services.importers.character_cards import _bounded_inflate
+
+    with pytest.raises(ValueError):
+        _bounded_inflate(zlib.compress(b"hello")[:-4])
+
+
+def test_a_legitimate_large_compressed_card_still_imports():
+    """The ceiling must not break real cards.
+
+    A 200k-character description is well under the limit, and a character card
+    that big is unusual but legal.
+    """
+    long_description = "The lantern gutters. " * 8_000
+    card = {"name": "Verbose", "description": long_description}
+    assert 100_000 < len(long_description) < 200_000
+    png = card_png(card, extra=chunk(b"iTXt", b"note\x00\x01\x00\x00\x00" + zlib.compress(b"ok")))
+    result = import_character_card(png, "verbose.png")
+    assert result.name == "Verbose"
+
+
 def test_ztext_and_itxt_metadata_are_extracted():
     card = {"name": "Compressed"}
     encoded = base64.b64encode(json.dumps(card).encode())

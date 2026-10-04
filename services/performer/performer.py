@@ -34,11 +34,13 @@ silently mis-attributed other characters' dialogue to the possessed character.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from services.core.enums import BeatStatus, ControlMode
+from services.core.events import MODEL_WRITABLE_EVENT_TYPES, canonical_event_type
 from services.core.state import StateSnapshot
 from services.director.plan import Beat, DirectorPlanDraft
 
@@ -754,26 +756,15 @@ PERFORMER_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "event_type": {
                         "type": "string",
-                        "enum": [
-                            "character_moved",
-                            "character_spoke",
-                            "character_performed_action",
-                            "item_obtained",
-                            "item_destroyed",
-                            "character_injured",
-                            "relationship_changed",
-                            "knowledge_acquired",
-                            "knowledge_suspected",
-                            "scene_ended",
-                        ],
+                        "enum": list(MODEL_WRITABLE_EVENT_TYPES),
                     },
                     "character_id": {"type": "string"},
                     "source_character_id": {"type": "string"},
                     "target_character_id": {"type": "string"},
                     "text": {"type": "string"},
                     "action": {"type": "string"},
-                    "item_id": {"type": "string"},
-                    "location_id": {"type": "string"},
+                    "item": {"type": "string"},
+                    "injury": {"type": "string"},
                     "severity": {"type": "string"},
                     "fact": {"type": "string"},
                     "relationship_type": {"type": "string"},
@@ -893,6 +884,9 @@ def read_performer_result(
         proposed_events = [
             dict(entry) for entry in _as_list(value.get("new_events")) if isinstance(entry, dict)
         ]
+    for event in proposed_events:
+        if event.get("event_type"):
+            event["event_type"] = canonical_event_type(str(event["event_type"]))
 
     state_claims = [
         dict(entry) for entry in _as_list(value.get("state_changes")) if isinstance(entry, dict)
@@ -972,6 +966,18 @@ def check_user_agency(result: PerformerResult, *, request: PerformerRequest) -> 
     An ``observation`` or ``reaction`` attributed to a possessed character is
     connective tissue and is allowed: the drawer opens, the dust lifts, the
     witness inhales. That is the Performer supplying texture, not intent.
+
+    ``kind`` is deliberately *not* consulted. It is a field the model fills in,
+    so a check that reads it is a request rather than a guarantee — and the
+    request is one token away from being ignored. An earlier version read
+    ``kind == "decision"`` and was bypassed by sending the same action labelled
+    ``reaction``, which then committed as an authoritative ``user_action`` for a
+    character the user owns. What the user asked for is the ground truth here,
+    and ``user_input`` is the one statement of intent that is not model-authored.
+
+    The check also covers ``proposed_events`` and ``state_claims``. It used to
+    read ``actor_actions`` only, so a turn that asserted state for the possessed
+    character in a claim rather than in the action list passed unexamined.
     """
     violations: list[PerformerViolation] = []
     for brief in request.actors:
@@ -980,7 +986,7 @@ def check_user_agency(result: PerformerResult, *, request: PerformerRequest) -> 
         for turn in result.actor_actions:
             if turn.character_id != brief.character_id:
                 continue
-            if turn.kind == "decision":
+            if not _grounded_in_user_input(turn.action, request.user_input):
                 violations.append(
                     PerformerViolation(
                         code="user_agency_violation",
@@ -992,6 +998,30 @@ def check_user_agency(result: PerformerResult, *, request: PerformerRequest) -> 
                         detail=turn.action[:200],
                     )
                 )
+        for claim, label in (
+            *(
+                (event, "proposed event")
+                for event in result.proposed_events
+            ),
+            *(
+                (claim, "state claim")
+                for claim in result.state_claims
+            ),
+        ):
+            claimed_id = claim.get("character_id") or claim.get("entity_id")
+            if claimed_id != brief.character_id:
+                continue
+            violations.append(
+                PerformerViolation(
+                    code="user_agency_violation",
+                    summary=(
+                        f"A {label} asserts state for the user-controlled "
+                        f"character {brief.name}"
+                    ),
+                    character_id=brief.character_id,
+                    detail=json.dumps(claim, default=str)[:200],
+                )
+            )
         for turn in result.dialogue:
             if turn.character_id != brief.character_id:
                 continue
@@ -1113,6 +1143,40 @@ def _content_present(wanted: str, haystack: str) -> bool:
     if not tokens:
         return wanted in haystack
     return all(token in haystack for token in tokens)
+
+
+_STOPWORDS = frozenset(
+    """a an and are as at be been by for from has have he her him his in into is it its
+    of on or she that the their them then there they this to was were with you your""".split()
+)
+
+
+def _grounded_in_user_input(action: str, user_input: str) -> bool:
+    """Whether ``action`` restates something the user actually asked for.
+
+    This is the trust boundary for a user-controlled character. The Performer
+    cannot be asked whether it took over — it fills in that field itself — so the
+    only statement of user intent that is not model-authored is the user's own
+    input. An action passes when its distinctive words come from there.
+
+    Deliberately a *weak* test in the permissive direction: any substantial
+    overlap is enough, and short connective actions are excused. The failure mode
+    this accepts is a legitimate-sounding action the user did not quite ask for;
+    the failure mode it prevents is a character signing away their own estate
+    because a label said "reaction".
+    """
+    if not user_input.strip():
+        return False
+    action_words = [
+        word
+        for word in re.findall(r"[a-z']+", action.casefold())
+        if word not in _STOPWORDS and len(word) > 3
+    ]
+    if not action_words:
+        # Nothing substantive claimed: texture, not intent.
+        return True
+    input_words = set(re.findall(r"[a-z']+", user_input.casefold()))
+    return any(word in input_words for word in action_words)
 
 
 # --- Beat progression -------------------------------------------------------

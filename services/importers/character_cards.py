@@ -13,6 +13,14 @@ MAX_NAME_LENGTH = 200
 MAX_ENTRY_NAME_LENGTH = 300
 MAX_TEXT_LENGTH = 200_000
 MAX_JSON_DEPTH = 32
+# Ceiling on a *decompressed* text chunk. Generous next to MAX_TEXT_LENGTH,
+# which is the limit the imported card text is then held to, so a real card is
+# never caught by it; low enough that a bomb cannot exhaust memory. See
+# ``_bounded_inflate``.
+MAX_DECOMPRESSED_TEXT_BYTES = 4 * 1024 * 1024
+# Working-set size per inflate step. Bounds peak memory independently of the
+# total result size.
+_INFLATE_CHUNK_BYTES = 64 * 1024
 
 
 class CardImportError(ValueError):
@@ -152,6 +160,41 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+def _bounded_inflate(data: bytes, *, limit: int = MAX_DECOMPRESSED_TEXT_BYTES) -> bytes:
+    """Inflate ``data``, refusing to produce more than ``limit`` bytes.
+
+    ``zlib.decompress`` is a request to allocate whatever the stream claims, and
+    a PNG text chunk is attacker-controlled in full: length, compression flag and
+    payload. ``MAX_IMPORT_BYTES`` does not help, because it bounds the *uploaded*
+    file while the bomb is what the file expands to.
+
+    Feeding the stream in slices with ``max_length`` keeps the ceiling on memory
+    actually held, not just on the result — a 64 MB bomb is abandoned after the
+    first overshoot rather than after being fully expanded.
+    """
+    decompressor = zlib.decompressobj()
+    output: list[bytes] = []
+    total = 0
+    for start in range(0, len(data), _INFLATE_CHUNK_BYTES):
+        piece = decompressor.decompress(data[start : start + _INFLATE_CHUNK_BYTES], _INFLATE_CHUNK_BYTES)
+        if piece:
+            total += len(piece)
+            if total > limit:
+                raise ValueError("Compressed text chunk expands beyond the import limit")
+            output.append(piece)
+        if decompressor.eof:
+            break
+    if not decompressor.eof:
+        # Truncated compressed data otherwise decodes to whatever survived, which
+        # can still be valid JSON — a half-written card would import as a real one.
+        raise ValueError("Compressed text chunk is truncated")
+    output.append(decompressor.flush())
+    result = b"".join(output)
+    if len(result) > limit:
+        raise ValueError("Compressed text chunk expands beyond the import limit")
+    return result
+
+
 def _decode_itxt(chunk_data: bytes) -> tuple[str | None, str | None]:
     keyword_bytes, separator, remainder = chunk_data.partition(b"\x00")
     if not separator or len(remainder) < 2:
@@ -166,9 +209,9 @@ def _decode_itxt(chunk_data: bytes) -> tuple[str | None, str | None]:
         return None, None
     try:
         if compression_flag == 1:
-            text = zlib.decompress(text)
+            text = _bounded_inflate(text)
         return keyword_bytes.decode("latin-1", errors="ignore"), text.decode("utf-8", errors="strict")
-    except (UnicodeDecodeError, zlib.error):
+    except (UnicodeDecodeError, ValueError, zlib.error):
         return None, None
 
 
@@ -206,8 +249,8 @@ def _decode_png_card(data: bytes) -> tuple[dict[str, Any], str]:
             keyword = keyword_bytes.decode("latin-1", errors="ignore")
             if len(remainder) >= 2 and remainder[0] == 0:
                 try:
-                    text = zlib.decompress(remainder[1:]).decode("latin-1", errors="ignore")
-                except zlib.error:
+                    text = _bounded_inflate(remainder[1:]).decode("latin-1", errors="ignore")
+                except (ValueError, zlib.error):
                     text = None
         if keyword in keyword_rank and text:
             rank = int(keyword_rank[keyword])

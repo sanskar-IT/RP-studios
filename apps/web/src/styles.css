@@ -41,6 +41,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .primary-button, .command-button { border: 1px solid var(--gold); color: #17130d; background: var(--gold); padding: 12px 17px; font-weight: 800; letter-spacing: 0.01em; transition: transform 120ms ease, background 120ms ease; }
 .primary-button:hover, .command-button:hover { background: #e7bf7d; transform: translateY(-1px); }
 .error-banner { margin-top: 18px; border: 1px solid rgba(214, 142, 142, 0.35); background: rgba(214, 142, 142, 0.1); color: #e7b0b0; padding: 11px 13px; font-size: 12px; }
+.provider-notice { margin: 10px 20px 0; border: 1px solid rgba(214, 176, 106, 0.4); background: rgba(214, 176, 106, 0.12); color: #e2c489; padding: 10px 13px; font: 10px/1.5 var(--mono); }
 .global-error { margin: 10px 20px 0; }
 
 .topbar { height: 72px; flex: 0 0 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid var(--line); background: rgba(16, 17, 20, 0.88); }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 
 import { api, readStagingResult } from "./api";
 import CastPanel, { type ImportKind, type PendingImport } from "./components/CastPanel";
-import CommandDock from "./components/CommandDock";
+import CommandDock, { modeAllowsEmptyCommand } from "./components/CommandDock";
 import ContextInspector from "./components/ContextInspector";
 import ErrorBanner from "./components/ErrorBanner";
 import PerformanceStream from "./components/PerformanceStream";
@@ -23,6 +23,7 @@ import type {
   LorebookSummary,
   MemoryInspection,
   Project,
+  ProviderCapabilities,
   Scene,
   SceneActor,
   SceneSession,
@@ -77,6 +78,7 @@ export default function App() {
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<ProviderCapabilities | null>(null);
   const sceneSelectionRef = useRef("");
 
   const project = useMemo(() => projects.find((item) => item.id === projectId) ?? null, [projectId, projects]);
@@ -243,6 +245,15 @@ export default function App() {
   useEffect(() => {
     setActorOverride((current) => (actors.some((actor) => actor.character_id === current) ? current : ""));
   }, [actors]);
+
+  // The provider is independent of the workspace, so it is fetched once. Silence
+  // on failure: a missing banner must never block a working session.
+  useEffect(() => {
+    void api
+      .providerCapabilities()
+      .then(setProvider)
+      .catch(() => setProvider(null));
+  }, []);
 
   const performanceViews = useMemo(
     () => timelineEventViews((inspect?.events ?? []).filter((event) => isPerformanceEvent(event.event_type)), characterName),
@@ -529,8 +540,12 @@ export default function App() {
 
   async function submitCommand(event?: FormEvent) {
     event?.preventDefault();
-    if (!projectId || !command.trim() || !canSubmit) return;
+    if (!projectId || !canSubmit) return;
     const text = command.trim();
+    // Continue is the "let the scene keep going" control: an empty command is a
+    // legitimate turn there, and the engine advances the beat for it. The other
+    // modes are declarations, where empty input is meaningless.
+    if (!text && !modeAllowsEmptyCommand(mode)) return;
     const retry = () => void submitCommand(event);
     if (mode === "Retcon") {
       if (!timelineId) return;
@@ -747,6 +762,14 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {provider?.adapter === "heuristic" && (
+        <div className="provider-notice" role="status">
+          <strong>No model is configured.</strong> Responses are templated and will
+          echo your input back rather than write prose. Set a provider key to run
+          the studio for real.
+        </div>
+      )}
 
       {failure && (
         <ErrorBanner

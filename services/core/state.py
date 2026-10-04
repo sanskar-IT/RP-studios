@@ -109,6 +109,29 @@ def _character(snapshot: StateSnapshot, character_id: str) -> dict[str, Any]:
     return snapshot.characters.setdefault(character_id, {"character_id": character_id})
 
 
+# Actions whose *content* is speech, and speech is not automatically shared.
+#
+# What each of these means: the character moved, held something, or spoke. The
+# second is a thing anyone present can observe, so it is kept — continuity
+# ("where did the locket go?") depends on it. The first is not, so it is reduced
+# to a non-content label. Keeping the words here is what made a one-turn leak
+# permanent: state is re-projected from the event log forever, and the brief
+# builder puts ``last_action`` into every character's prompt, so one secret
+# spoken quietly to a single person became a permanent, unknowable leak into
+# every other character's context on every subsequent turn.
+_LAST_ACTION_SUMMARY: dict[str, str] = {
+    CHARACTER_SPOKE: "spoke",
+    USER_ACTION: "acted",
+    AI_ACTION: "acted",
+}
+
+
+def _last_action_summary(event_type: str, payload: dict[str, Any]) -> str:
+    if event_type in _LAST_ACTION_SUMMARY:
+        return _LAST_ACTION_SUMMARY[event_type]
+    return str(payload.get("text", payload.get("action", "")))
+
+
 def apply_event(snapshot: StateSnapshot, event_type: str, payload: dict[str, Any]) -> StateSnapshot:
     next_snapshot = StateSnapshot.from_dict(snapshot.to_dict())
     if event_type in {CHARACTER_MOVED, LOCATION_CHANGED}:
@@ -136,7 +159,7 @@ def apply_event(snapshot: StateSnapshot, event_type: str, payload: dict[str, Any
         character_id = payload.get("character_id")
         if character_id:
             character = _character(next_snapshot, character_id)
-            character["last_action"] = payload.get("text", payload.get("action", ""))
+            character["last_action"] = _last_action_summary(event_type, payload)
             character["last_action_type"] = event_type
     elif event_type == RELATIONSHIP_CHANGED:
         source_id = payload.get("source_character_id")

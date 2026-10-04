@@ -321,3 +321,246 @@ async def test_unspoken_knowledge_reaches_no_other_prompt(session):
         project_id=project.id, scene_id=scene.id, actor_character_id=two.id
     )
     assert "the loose stone conceals a file" not in recorder.prompts[0]
+
+
+SECRET_LINE = "The loose stone hides a file naming the captain as the traitor."
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["character_spoke", "user_action", "ai_action"],
+    ids=["character_spoke", "user_action", "ai_action"],
+)
+def test_speech_content_is_not_kept_in_a_persisted_last_action(event_type):
+    """``last_action`` must not become a permanent copy of what was said.
+
+    The fact that a character spoke is public; the content is not. Storing the
+    raw line meant the secret was re-projected into every later state snapshot and
+    re-inserted into every subsequent prompt for every character — indefinitely,
+    long after the moment of the utterance, and regardless of who was in earshot.
+    """
+    from services.core.events import AI_ACTION, CHARACTER_SPOKE, USER_ACTION
+    from services.core.state import StateSnapshot, apply_event
+
+    by_name = {
+        "character_spoke": CHARACTER_SPOKE,
+        "user_action": USER_ACTION,
+        "ai_action": AI_ACTION,
+    }
+    snapshot = StateSnapshot.from_dict(
+        {"characters": {"one": {"character_id": "one", "name": "One"}}}
+    )
+    updated = apply_event(
+        snapshot,
+        by_name[event_type],
+        {"character_id": "one", "text": SECRET_LINE},
+    )
+    stored = updated.characters["one"].get("last_action") or ""
+    assert SECRET_LINE not in stored
+    # The event is still recorded — the character did do something.
+    assert stored
+    assert updated.characters["one"]["last_action_type"] == by_name[event_type]
+
+
+def test_an_observable_action_is_kept_so_continuity_survives():
+    """``character_performed_action`` is a visible act, not a private utterance.
+
+    Dropping this too would leave characters with no memory of having moved,
+    taken or dropped anything, which is a real continuity cost for no isolation
+    win.
+    """
+    from services.core.events import CHARACTER_PERFORMED_ACTION
+    from services.core.state import StateSnapshot, apply_event
+
+    snapshot = StateSnapshot.from_dict(
+        {"characters": {"one": {"character_id": "one", "name": "One"}}}
+    )
+    updated = apply_event(
+        snapshot,
+        CHARACTER_PERFORMED_ACTION,
+        {"character_id": "one", "action": "takes the locket from the table"},
+    )
+    assert "locket" in updated.characters["one"]["last_action"]
+
+
+@pytest.mark.asyncio
+async def test_a_secret_spoken_aloud_does_not_survive_in_the_projected_state(session):
+    """End-to-end: One says the secret, then the scene is projected again.
+
+    This closes the *permanent* half of the leak. The event log still holds the
+    utterance — it must, it is the record of what happened — but nothing
+    derived from it carries the words forward, so the secret cannot reappear on
+    turn 5 having been quietly re-projected on turns 2, 3 and 4.
+    """
+    project = repository.create_project(session, "Leak")
+    one = repository.add_character(session, project_id=project.id, name="One")
+    two = repository.add_character(session, project_id=project.id, name="Two")
+    outsider = repository.add_character(session, project_id=project.id, name="Outsider")
+    scene = repository.create_scene(
+        session,
+        project_id=project.id,
+        timeline_id=project.active_timeline_id,
+        title="Passage",
+        participant_ids=[one.id, two.id],
+    )
+    session.commit()
+
+    from services.narrative.pipeline import NarrativePipeline
+
+    staging = json.loads((FIXTURES / "staging.json").read_text(encoding="utf-8"))
+    await NarrativePipeline(session, ScriptedProvider([staging])).stage(
+        project_id=project.id,
+        premise="Two conspirators speak, one bystander waits",
+        scene_id=scene.id,
+        character_ids=[one.id, two.id, outsider.id],
+    )
+    pipeline = NarrativePipeline(session, ScriptedProvider([]))
+    pipeline.approve_scene(project_id=project.id, scene_id=scene.id)
+
+    await NarrativePipeline(
+        session,
+        ScriptedProvider(
+            [
+                {
+                    "selected_actor": one.id,
+                    "reason": "scripted",
+                    "prose": "One leans in and says it plainly.",
+                    "actions": [],
+                    "new_events": [
+                        {
+                            "event_type": "character_spoke",
+                            "character_id": one.id,
+                            "text": SECRET_LINE,
+                        }
+                    ],
+                    "state_changes": [],
+                    "open_commitments": [],
+                }
+            ]
+        ),
+    ).continue_scene(project_id=project.id, scene_id=scene.id, actor_character_id=one.id)
+
+    class RecordingProvider(ScriptedProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.prompts = []
+
+        async def structured(self, messages, schema):
+            self.prompts.append(messages[-1].content)
+            return await super().structured(messages, schema)
+
+    recorder = RecordingProvider(
+        [
+            {
+                "selected_actor": outsider.id,
+                "reason": "scripted",
+                "prose": "The bystander waits.",
+                "actions": [],
+                "new_events": [],
+                "state_changes": [],
+                "open_commitments": [],
+            }
+        ]
+    )
+    result = await NarrativePipeline(session, recorder).continue_scene(
+        project_id=project.id, scene_id=scene.id, actor_character_id=outsider.id
+    )
+
+    # The secret must not be carried in any character's persisted fields.
+    assert SECRET_LINE not in json.dumps(result.state)
+    for character in (result.state or {}).get("characters", {}).values():
+        assert SECRET_LINE not in json.dumps(character)
+
+
+@pytest.mark.asyncio
+async def test_recent_events_still_expose_speech_within_the_window(session):
+    """Tracked limitation — the *in-window* half of the leak is not yet fixed.
+
+    ``last_action`` no longer retains speech, but ``_recent_events`` renders the
+    last few events' text to every character regardless of who was present, and
+    ``_overhear`` grants no suspicion for a paraphrase. So a bystander prompted
+    in the same scene still sees the line.
+
+    This test pins the current behaviour on purpose: it fails when someone fixes
+    ``_recent_events`` without also recording the change, and it makes the
+    remaining gap visible instead of leaving it implied by the passing test
+    above. The principled fix is to make ``_overhear`` fail *open* toward
+    suspicion, which is a design change with its own cost — suspicion growth is
+    already unbounded — so it is deliberately out of scope for this milestone.
+    """
+    project = repository.create_project(session, "Window")
+    one = repository.add_character(session, project_id=project.id, name="One")
+    outsider = repository.add_character(session, project_id=project.id, name="Outsider")
+    scene = repository.create_scene(
+        session,
+        project_id=project.id,
+        timeline_id=project.active_timeline_id,
+        title="Passage",
+        participant_ids=[one.id, outsider.id],
+    )
+    session.commit()
+
+    from services.narrative.pipeline import NarrativePipeline
+
+    staging = json.loads((FIXTURES / "staging.json").read_text(encoding="utf-8"))
+    await NarrativePipeline(session, ScriptedProvider([staging])).stage(
+        project_id=project.id,
+        premise="One whispers, one bystander waits",
+        scene_id=scene.id,
+        character_ids=[one.id, outsider.id],
+    )
+    pipeline = NarrativePipeline(session, ScriptedProvider([]))
+    pipeline.approve_scene(project_id=project.id, scene_id=scene.id)
+
+    await NarrativePipeline(
+        session,
+        ScriptedProvider(
+            [
+                {
+                    "selected_actor": one.id,
+                    "reason": "scripted",
+                    "prose": "One says it quietly.",
+                    "actions": [],
+                    "new_events": [
+                        {
+                            "event_type": "character_spoke",
+                            "character_id": one.id,
+                            "text": SECRET_LINE,
+                        }
+                    ],
+                    "state_changes": [],
+                    "open_commitments": [],
+                }
+            ]
+        ),
+    ).continue_scene(project_id=project.id, scene_id=scene.id, actor_character_id=one.id)
+
+    class RecordingProvider(ScriptedProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.prompts = []
+
+        async def structured(self, messages, schema):
+            self.prompts.append(messages[-1].content)
+            return await super().structured(messages, schema)
+
+    recorder = RecordingProvider(
+        [
+            {
+                "selected_actor": outsider.id,
+                "reason": "scripted",
+                "prose": "The bystander waits.",
+                "actions": [],
+                "new_events": [],
+                "state_changes": [],
+                "open_commitments": [],
+            }
+        ]
+    )
+    await NarrativePipeline(session, recorder).continue_scene(
+        project_id=project.id, scene_id=scene.id, actor_character_id=outsider.id
+    )
+    assert SECRET_LINE in recorder.prompts[0], (
+        "in-window recent-events exposure was fixed; update this test and record "
+        "the change in docs/KNOWLEDGE_MODEL.md"
+    )

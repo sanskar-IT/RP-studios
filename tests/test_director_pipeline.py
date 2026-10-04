@@ -128,6 +128,87 @@ async def test_a_choice_carrying_plan_still_has_beats_to_perform(staged, session
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_input",
+    [
+        "I follow her down the hall",
+        "I keep pressing them",
+        "I look at it",
+        "take this and go",
+        "I hand the letter to him",
+    ],
+)
+async def test_ordinary_pronouns_do_not_halt_the_scene(staged, session, user_input):
+    """A pronoun in ordinary input must not stop the turn.
+
+    ``_REFERENT`` classifies any pronoun as ``AMBIGUOUS``, and approval was
+    required for anything not ``consistent`` — at *every* authority level,
+    including the default ``director_assisted``. So "I follow her" produced an
+    empty turn and an approval prompt, and a scene with two characters could not
+    be played with ordinary sentences.
+
+    ``docs/INTENT_MODEL.md`` already says ambiguous "is a warning, not a wall".
+    """
+    project, _characters, scene, pipeline = staged(responses=("normal_turn.json",))
+    turn = await pipeline.continue_scene(
+        project_id=project.id, scene_id=scene.id, user_input=user_input
+    )
+    assert turn.requires_approval is not True, f"{user_input!r} demanded approval"
+    assert turn.generation_id is not None, f"{user_input!r} performed nothing"
+    assert turn.output_text
+
+
+def test_a_pronoun_still_marks_the_intent_ambiguous():
+    """The classifier keeps flagging it; only the gate changed.
+
+    Ambiguity is real information — it lowers confidence and biases the plan
+    toward the conservative reading. What it must not do is stop the scene.
+    """
+    from services.director.intent import Consistency, interpret
+
+    intent = interpret("Tell him the truth.", participant_names=["Alice", "Detective"])
+    assert intent.consistency is Consistency.AMBIGUOUS
+
+
+def test_a_contradiction_still_halts_the_scene_at_every_authority(staged, session):
+    """Contradictory intent is the one consistency level that must gate.
+
+    Guessing which half of "be honest but tell no lies" the user meant is the
+    silent reinterpretation the Director exists to prevent.
+    """
+    from services.core.enums import AuthorityMode, Lane
+    from services.director.envelope import requires_approval
+    from services.director.intent import interpret
+    from services.director.plan import build_heuristic_plan
+
+    intent = interpret(
+        "Kill the General but keep him alive",
+        participant_names=["General", "Witness"],
+    )
+    plan = build_heuristic_plan(
+        intent, lane=Lane.DIRECTION, participants=["a", "b"], authority=AuthorityMode.AI_DIRECTED
+    )
+    assert intent.consistency.value == "contradictory"
+    assert requires_approval(plan, authority=AuthorityMode.AI_DIRECTED)
+
+
+@pytest.mark.asyncio
+async def test_strict_authority_still_holds_the_turn(staged, session):
+    """Fixing the pronoun gate must not weaken strict authority."""
+    project, _characters, scene, pipeline = staged(
+        authority=AuthorityMode.STRICT,
+        responses=("normal_turn.json", "normal_turn.json"),
+    )
+    turn = await pipeline.continue_scene(
+        project_id=project.id,
+        scene_id=scene.id,
+        user_input="Build toward the confrontation slowly",
+    )
+    assert turn.requires_approval is True
+    assert turn.generation_id is None
+
+
+@pytest.mark.asyncio
 async def test_a_multi_beat_plan_stays_executing_until_its_beats_are_done(staged, session):
     """One turn realises one beat. A plan is not complete until it has been performed.
 

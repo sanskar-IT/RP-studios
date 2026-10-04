@@ -13,6 +13,7 @@ import type {
   MemoryInspection,
   PipelineResult,
   Project,
+  ProviderCapabilities,
   Scene,
   SceneActor,
   SceneSession,
@@ -59,6 +60,7 @@ export function readStagingResult(result: PipelineResult | JsonObject): StagingP
 }
 
 export const api = {
+  providerCapabilities: () => request<ProviderCapabilities>("/api/providers/capabilities"),
   listProjects: () => request<Project[]>("/api/projects"),
   createProject: (name: string, description: string) =>
     request<Project>("/api/projects", {

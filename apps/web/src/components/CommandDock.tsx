@@ -29,6 +29,19 @@ const PROMPTS: Record<InputMode, { label: string; placeholder: string; action: s
   Retcon: { label: "Declare a canon change…", placeholder: "The Emperor survived the assassination…", action: "Override canon" }
 };
 
+/**
+ * Whether this mode can be submitted with no text.
+ *
+ * Continue exists to let the scene move on when the user wants to watch rather
+ * than write, so an empty command is a valid turn there and the engine already
+ * handles it. The other modes are declarations — an intent, a world change, a
+ * canon override — where empty input is meaningless rather than a shortcut, and
+ * submitting one would create a blank record.
+ */
+export function modeAllowsEmptyCommand(mode: InputMode): boolean {
+  return mode === "Auto" || mode === "Actor" || mode === "Narrator";
+}
+
 export default function CommandDock({
   mode,
   onModeChange,
@@ -74,7 +87,10 @@ export default function CommandDock({
           disabled={!canSubmit}
           aria-label="Performance input"
         />
-        <button className="command-button" disabled={busy || !canSubmit || !command.trim()}>
+        <button
+          className="command-button"
+          disabled={busy || !canSubmit || (!modeAllowsEmptyCommand(mode) && !command.trim())}
+        >
           {busy ? "…" : prompt.action}
         </button>
       </form>

@@ -24,6 +24,7 @@ from typing import Any
 
 from services.core.enums import AuthorityMode, Horizon, Lane, PlanStatus
 from services.core.state import StateSnapshot
+from services.director.intent import Consistency
 from services.director.plan import DirectorPlanDraft
 
 _NEGATION = re.compile(
@@ -422,12 +423,22 @@ def requires_approval(
 ) -> bool:
     """Whether this plan must stop and wait for a human decision.
 
-    Approval is required under ``strict`` and ``collaborative``, whenever the
-    intent itself is inconsistent, and whenever a canon conflict is unresolved.
-    It is *not* required for an ordinary well-formed turn, which is what keeps
-    the normal path uninterrupted.
+    Approval is required under ``strict`` and ``collaborative``, when the intent
+    contradicts itself, and when a canon conflict is unresolved.
+
+    It is deliberately *not* required for an ambiguous intent, even though
+    ambiguous is not ``consistent``. ``docs/INTENT_MODEL.md`` draws the line
+    explicitly: "Ambiguous is different. It is a warning, not a wall." Gating on
+    it stopped the ordinary path dead — ``_REFERENT`` marks *any* pronoun as
+    ambiguous, so "I follow her down the hall", "I look at it" and "I hand the
+    letter to him" all produced an empty turn and an approval prompt, at every
+    authority level including the default ``director_assisted``. A scene with two
+    characters in it could not be played with ordinary sentences.
+
+    Ambiguity still does its job elsewhere: it discounts the plan's confidence
+    and biases the Performer toward the conservative reading.
     """
-    if plan.intent.consistency.value != "consistent":
+    if plan.intent.consistency is Consistency.CONTRADICTORY:
         return True
     if plan.canon_conflict and plan.canon_conflict.get("resolution") in {None, "", "ask"}:
         return True
