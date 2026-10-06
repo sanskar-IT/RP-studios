@@ -999,17 +999,15 @@ def check_user_agency(result: PerformerResult, *, request: PerformerRequest) -> 
                     )
                 )
         for claim, label in (
-            *(
-                (event, "proposed event")
-                for event in result.proposed_events
-            ),
-            *(
-                (claim, "state claim")
-                for claim in result.state_claims
-            ),
+            *((event, "proposed event") for event in result.proposed_events),
+            *((claim, "state claim") for claim in result.state_claims),
         ):
-            claimed_id = claim.get("character_id") or claim.get("entity_id")
-            if claimed_id != brief.character_id:
+            named = [
+                str(claim[field])
+                for field in CHARACTER_REFERENCE_FIELDS
+                if claim.get(field) == brief.character_id
+            ]
+            if not named:
                 continue
             violations.append(
                 PerformerViolation(
@@ -1150,6 +1148,20 @@ _STOPWORDS = frozenset(
     of on or she that the their them then there they this to was were with you your""".split()
 )
 
+# How many of a possessed character's action words may go unexplained by the
+# user's own input. Two covers paraphrase slack and a short connective clause;
+# every observed takeover attempt leaves four or five.
+_UNGROUNDED_WORD_BUDGET = 2
+
+# Every field through which a claim can name a character. These are the same
+# three the engine validates against (``claims.CHARACTER_FIELDS``), so a claim
+# that passes the engine's participant check can still name a possessed
+# character here. Checking only ``character_id`` missed
+# ``relationship_changed``, whose whole purpose is to name two characters via
+# ``source_character_id`` and ``target_character_id`` — so the model could rewrite
+# the user's relationships without tripping the check.
+CHARACTER_REFERENCE_FIELDS = ("character_id", "source_character_id", "target_character_id", "entity_id")
+
 
 def _grounded_in_user_input(action: str, user_input: str) -> bool:
     """Whether ``action`` restates something the user actually asked for.
@@ -1157,13 +1169,26 @@ def _grounded_in_user_input(action: str, user_input: str) -> bool:
     This is the trust boundary for a user-controlled character. The Performer
     cannot be asked whether it took over — it fills in that field itself — so the
     only statement of user intent that is not model-authored is the user's own
-    input. An action passes when its distinctive words come from there.
+    input.
 
-    Deliberately a *weak* test in the permissive direction: any substantial
-    overlap is enough, and short connective actions are excused. The failure mode
-    this accepts is a legitimate-sounding action the user did not quite ask for;
-    the failure mode it prevents is a character signing away their own estate
-    because a label said "reaction".
+    The test is on *how much of the action the input accounts for*, not on
+    whether any word matches. Overlap alone is not an enforcement mechanism, it
+    is a suggestion the model can satisfy for free: "opens the drawer, retrieves
+    the ledger, burns it" contains "drawer", matches, and carries two
+    irreversible acts the user never asked for.
+
+    So the action's distinctive words are compared against the input's, and the
+    *unmatched* ones are counted — they are the model's own contribution. Two is
+    the budget. That absorbs paraphrase slack ("draws the drawer open" for "I open
+    the drawer", "tells the detective the truth" for "I tell him the truth") and
+    a short connective clause ("steadies the drawer"), while a real takeover
+    leaves four or five unmatched words: "picks up the knife and stabs the
+    butler", "signs away the estate to the suspect".
+
+    Every bypass of the previous one-token rule arrived by adding irreversible
+    acts to a legitimate clause, so the budget is on unmatched *count*, not
+    matched count — an attacker with one grounded verb gets no more room for an
+    unasked act than one with none.
     """
     if not user_input.strip():
         return False
@@ -1176,7 +1201,8 @@ def _grounded_in_user_input(action: str, user_input: str) -> bool:
         # Nothing substantive claimed: texture, not intent.
         return True
     input_words = set(re.findall(r"[a-z']+", user_input.casefold()))
-    return any(word in input_words for word in action_words)
+    unmatched = [word for word in action_words if word not in input_words]
+    return len(unmatched) <= _UNGROUNDED_WORD_BUDGET
 
 
 # --- Beat progression -------------------------------------------------------

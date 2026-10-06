@@ -506,6 +506,44 @@ async def test_a_major_decision_relabelled_as_a_reaction_is_still_refused(sessio
     assert not committed, "the invented decision was committed to the timeline"
 
 
+@pytest.mark.parametrize(
+    "user_input,action,expected",
+    [
+        # The user's own action, restated.
+        ("I open the drawer.", "draws the drawer open", True),
+        # Paraphrase: the input says "him", the action names him.
+        ("I tell him the truth.", "tells the detective the truth", True),
+        # Connective texture, the case possession exists for.
+        ("I open the drawer.", "steadies the drawer with one hand", True),
+        ("I confront the butler.", "hesitates", True),
+        # Irreversible acts the user never asked for, appended to a legitimate
+        # clause so the action still contains a grounded word.
+        ("I open the drawer.", "opens the drawer, retrieves the ledger, burns it", False),
+        ("I sign the contract.", "signs the contract and hands over the deed", False),
+        # Unrelated takeover.
+        ("I nod.", "picks up the knife and stabs the butler", False),
+        ("I open the drawer.", "signs away the estate to the suspect", False),
+        # No user input at all: nothing is grounded.
+        ("", "hesitates", False),
+        # Nothing substantive claimed.
+        ("I wait.", "", True),
+    ],
+)
+def test_grounding_is_measured_by_coverage_not_overlap(user_input, action, expected):
+    """One matching word must not license arbitrary extra content.
+
+    The first implementation required only that a single action word appeared in
+    the input. That is satisfied for free by prefixing a takeover with something
+    the user did ask for — "opens the drawer, retrieves the ledger, burns it"
+    matches "drawer" and commits two irreversible acts. The budget is on words
+    the input does *not* explain, so adding an unasked act costs budget whether
+    or not the action also contains a grounded verb.
+    """
+    from services.performer.performer import _grounded_in_user_input
+
+    assert _grounded_in_user_input(action, user_input) is expected
+
+
 @pytest.mark.asyncio
 async def test_a_grounded_action_for_the_users_character_is_allowed(session, cast):
     """The check must not refuse the user the actions they actually chose.
@@ -598,6 +636,50 @@ async def test_a_possessed_id_in_a_claim_is_refused(session, cast, field):
     assert any(v.code == "user_agency_violation" for v in violations), (
         f"a possessed character_id in {field} was not checked"
     )
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        {
+            "event_type": "relationship_changed",
+            "source_character_id": "u1",
+            "target_character_id": "w1",
+        },
+        {
+            "event_type": "relationship_changed",
+            "source_character_id": "w1",
+            "target_character_id": "u1",
+        },
+    ],
+    ids=["as_source", "as_target"],
+)
+def test_a_possessed_id_in_any_character_field_is_refused(claim):
+    """A claim can name a character through more than one field.
+
+    ``claims.CHARACTER_FIELDS`` is what the engine validates against, and it
+    includes ``source_character_id`` and ``target_character_id`` because
+    ``relationship_changed`` names two characters that way. The possession check
+    read only ``character_id``/``entity_id``, so the model could rewrite the
+    user's relationships — an assertion about the user's own character — without
+    tripping it at all.
+    """
+    from services.performer.performer import (
+        PerformerRequest,
+        PerformerResult,
+        check_user_agency,
+    )
+
+    class _Brief:
+        character_id = "u1"
+        name = "Detective"
+        agency_withheld = True
+
+    violations = check_user_agency(
+        PerformerResult(prose="", proposed_events=[claim]),
+        request=PerformerRequest(scene_id="s", user_input="I look around.", actors=[_Brief()]),
+    )
+    assert any(v.code == "user_agency_violation" for v in violations)
 
 
 @pytest.mark.asyncio

@@ -454,6 +454,22 @@ remain open.
    enum from `MODEL_WRITABLE_EVENT_TYPES`, which also stops advertising
    `world_fact_created` — inviting the model to publish a private belief as canon.
    See `tests/test_event_vocabulary.py`.
+
+Finding 3's fix was itself defective for two rounds, in ways worth recording because
+they generalise:
+
+- Replacing a `kind` check with a grounding check, implemented as *any* word
+  matching, is not an enforcement mechanism. It is a suggestion the model can meet
+  for free, and the cheapest way to meet it is to append an unasked act to a
+  clause that already matches. Enforcement has to measure what the input fails to
+  account for, not what it happens to touch.
+- A safety check that names a character in fewer fields than the validator does is
+  a check with a hole shaped exactly like the difference. `relationship_changed`
+  was the entire gap, and it is the event type whose purpose is naming people.
+- Neither was found by the tests written alongside the fix. Both were found by
+  feeding the control its own adversarial input — a 1 KB compressed stream, and a
+  `relationship_changed` claim — after the fix was already merged. Tests written
+  alongside a fix tend to confirm the fix; tests written against it do not.
 9. **Actor selection is a six-branch cascade with two nondeterministic
    orderings** and no dead-character check.
 10. **Actorless narration is unreachable** from `continue_scene`; environment has
@@ -556,25 +572,43 @@ authoritative `user_action` for a character the user owns. `kind` cannot be the
 basis of the check, because the model chooses it.
 
 Enforcement is now *grounding*: an action for a possessed character is refused when
-its distinctive words do not appear in the user's own `user_input`. That input is
-the only statement of intent the model did not author, which makes it the trust
-boundary. The test is deliberately weak in the permissive direction — any
-substantial overlap passes, and short connective actions are excused — so the
-failure mode it accepts is an action the user did not quite ask for rather than a
-silent takeover. The alternative, refusing everything unprompted, would break the
-case possession exists for ("I open the drawer" → "steadies the drawer with one
-hand").
+too much of it goes unexplained by the user's own `user_input`. That input is the
+only statement of intent the model did not author, which makes it the trust
+boundary.
 
-The cost is real and worth watching in dogfooding: a legitimate-sounding connective
-the model adds unprompted will be refused. The turn is discarded and retried rather
-than committed, so it is recoverable.
+The measure is the action's words that the input does **not** explain, with a budget
+of two. Not overlap, and not strict coverage:
+
+- *Overlap* (any single matching word) is satisfiable for free by appending
+  irreversible acts to a legitimate clause. "opens the drawer, retrieves the
+  ledger, burns it" matches "drawer" and passed. Requiring an attacker to also
+  supply a grounded verb costs them nothing.
+- *Strict coverage* (every word explained) rejects the case possession exists for:
+  "steadies the drawer with one hand" for "I open the drawer", and "tells the
+  detective the truth" for "I tell him the truth".
+
+Two covers paraphrase slack and a short connective clause. Every observed takeover
+attempt leaves four or five unmatched words — "picks up the knife and stabs the
+butler", "signs away the estate to the suspect" — so the budget separates them with
+room to spare. Because the budget is on *unmatched* count, adding an unasked act
+costs budget whether or not the action also contains a grounded verb.
+
+The remaining cost is a false positive: a connective the model adds unprompted can
+still be refused. The turn is discarded and retried rather than committed, so it is
+recoverable. Worth watching in dogfooding.
 
 **2b. The check read `actor_actions` only.** `proposed_events` and `state_claims`
 were never examined, so a turn with no `actor_actions` for the possessed character
 passed unexamined while its claims named that character directly — the engine would
-apply state on the user's character's behalf with no check performed at all. Both
-are now covered: any possessed `character_id` or `entity_id` in either is a
-violation.
+apply state on the user's character's behalf with no check performed at all.
+
+**2c. And it read one field where the engine reads three.** The check looked at
+`character_id` and `entity_id`. The fields the engine validates a participant
+against are `claims.CHARACTER_FIELDS` — `character_id`, `source_character_id`, and
+`target_character_id` — because `relationship_changed` names two characters that
+way. So a claim could rewrite the user's relationships without tripping the check
+at all. The two views must not drift: every field through which a claim can name a
+character is now checked, on both sides.
 
 **3. Two possession mechanisms (finding 4).** `_resolve_control_modes` is now the
 single view. A per-call `possessed_character_id` is authoritative for that call and

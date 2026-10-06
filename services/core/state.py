@@ -119,10 +119,23 @@ def _character(snapshot: StateSnapshot, character_id: str) -> dict[str, Any]:
 # builder puts ``last_action`` into every character's prompt, so one secret
 # spoken quietly to a single person became a permanent, unknowable leak into
 # every other character's context on every subsequent turn.
+# Empty, not a label like "spoke".
+#
+# A content-free label is still a *positive* claim that the brief builders read
+# as intent: ``_goal_for`` in the Director turns any non-empty ``last_action``
+# into "continue: <action>", which reaches the Performer as beat direction.
+# "continue: spoke" is worse than the fallback it displaces ("observe and
+# respond to the current situation"), because it looks like a real instruction
+# while describing nothing.
+#
+# The fact that a character spoke is already carried by the event log and by
+# recent events within the window; what must not be carried forward is the
+# content. So the field records nothing for speech, and ``last_action_type``
+# still says *that* it happened.
 _LAST_ACTION_SUMMARY: dict[str, str] = {
-    CHARACTER_SPOKE: "spoke",
-    USER_ACTION: "acted",
-    AI_ACTION: "acted",
+    CHARACTER_SPOKE: "",
+    USER_ACTION: "",
+    AI_ACTION: "",
 }
 
 

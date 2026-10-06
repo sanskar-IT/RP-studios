@@ -171,18 +171,28 @@ def _bounded_inflate(data: bytes, *, limit: int = MAX_DECOMPRESSED_TEXT_BYTES) -
     Feeding the stream in slices with ``max_length`` keeps the ceiling on memory
     actually held, not just on the result — a 64 MB bomb is abandoned after the
     first overshoot rather than after being fully expanded.
+
+    The input to the decompressor is ``unconsumed_tail``, not the next slice of
+    the original buffer. When ``max_length`` is reached, zlib holds the input it
+    could not use in ``unconsumed_tail`` and stops; that tail has to be fed back
+    before the stream advances. Slicing the original buffer instead leaves the
+    tail unprocessed, the stream never reaches ``eof``, and highly compressible
+    data is misreported as truncated.
     """
     decompressor = zlib.decompressobj()
     output: list[bytes] = []
     total = 0
-    for start in range(0, len(data), _INFLATE_CHUNK_BYTES):
-        piece = decompressor.decompress(data[start : start + _INFLATE_CHUNK_BYTES], _INFLATE_CHUNK_BYTES)
+    pending = data
+    while pending and not decompressor.eof:
+        piece = decompressor.decompress(pending, _INFLATE_CHUNK_BYTES)
         if piece:
             total += len(piece)
             if total > limit:
                 raise ValueError("Compressed text chunk expands beyond the import limit")
             output.append(piece)
-        if decompressor.eof:
+        pending = decompressor.unconsumed_tail
+        if not piece and not pending:
+            # No progress and nothing buffered: the stream cannot complete.
             break
     if not decompressor.eof:
         # Truncated compressed data otherwise decodes to whatever survived, which

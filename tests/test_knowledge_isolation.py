@@ -357,9 +357,46 @@ def test_speech_content_is_not_kept_in_a_persisted_last_action(event_type):
     )
     stored = updated.characters["one"].get("last_action") or ""
     assert SECRET_LINE not in stored
-    # The event is still recorded — the character did do something.
-    assert stored
+    # The fact still happened and is still typed, it just carries no content.
     assert updated.characters["one"]["last_action_type"] == by_name[event_type]
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["character_spoke", "user_action", "ai_action"],
+    ids=["character_spoke", "user_action", "ai_action"],
+)
+def test_speech_leaves_no_phantom_goal_for_the_director_to_act_on(event_type):
+    """An empty field, not a label like ``"spoke"``.
+
+    ``_goal_for`` in the Director reads any non-empty ``last_action`` as intent
+    and emits ``"continue: <action>"``, which reaches the Performer as beat
+    direction. A placeholder label therefore produces ``"continue: spoke"`` —
+    a real-looking instruction that describes nothing, and it displaces the
+    fallback ("observe and respond to the current situation") that was at least
+    usable.
+    """
+    from services.core.events import AI_ACTION, CHARACTER_SPOKE, USER_ACTION
+    from services.core.state import StateSnapshot, apply_event
+    from services.director.director import _goal_for, _observable_goal_for
+
+    by_name = {
+        "character_spoke": CHARACTER_SPOKE,
+        "user_action": USER_ACTION,
+        "ai_action": AI_ACTION,
+    }
+    snapshot = StateSnapshot.from_dict(
+        {"characters": {"one": {"character_id": "one", "name": "One"}}}
+    )
+    updated = apply_event(
+        snapshot, by_name[event_type], {"character_id": "one", "text": SECRET_LINE}
+    )
+    record = updated.characters["one"]
+
+    assert _goal_for(record, [], []) == "observe and respond to the current situation"
+    assert _observable_goal_for(record, False) == (
+        "respond to what happens next, from their own perspective"
+    )
 
 
 def test_an_observable_action_is_kept_so_continuity_survives():

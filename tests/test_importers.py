@@ -109,6 +109,42 @@ def test_bounded_inflate_rejects_truncated_streams():
         _bounded_inflate(zlib.compress(b"hello")[:-4])
 
 
+@pytest.mark.parametrize("size", [1, 3, 4])
+def test_bounded_inflate_round_trips_highly_compressible_data(size):
+    """A stream spanning many steps must survive, not be called truncated.
+
+    ``max_length`` halts decompression partway and parks the unused input in
+    ``unconsumed_tail``; that tail has to be fed back before the stream advances.
+    An implementation that instead slices the original buffer leaves the tail
+    unprocessed, ``eof`` is never reached, and valid data is rejected as
+    truncated — which is how a 1 MiB payload compressing to 1 KiB was refused.
+    Repetitive data hits this hardest because it spans the most steps.
+    """
+    from services.importers.character_cards import _bounded_inflate
+
+    raw = b"A" * (size * 1024 * 1024)
+    assert len(zlib.compress(raw)) < 8 * 1024, "should compress hard enough to span steps"
+    assert _bounded_inflate(zlib.compress(raw)) == raw
+
+
+def test_bounded_inflate_accepts_exactly_the_ceiling_and_refuses_one_byte_over():
+    from services.importers.character_cards import (
+        MAX_DECOMPRESSED_TEXT_BYTES,
+        _bounded_inflate,
+    )
+
+    at_limit = b"B" * MAX_DECOMPRESSED_TEXT_BYTES
+    assert _bounded_inflate(zlib.compress(at_limit)) == at_limit
+    with pytest.raises(ValueError):
+        _bounded_inflate(zlib.compress(b"B" * (MAX_DECOMPRESSED_TEXT_BYTES + 1)))
+
+
+def test_bounded_inflate_handles_an_empty_payload():
+    from services.importers.character_cards import _bounded_inflate
+
+    assert _bounded_inflate(zlib.compress(b"")) == b""
+
+
 def test_a_legitimate_large_compressed_card_still_imports():
     """The ceiling must not break real cards.
 

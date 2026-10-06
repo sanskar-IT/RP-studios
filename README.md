@@ -31,7 +31,7 @@ produced by the commands in [Testing and Quality Checks](#testing-and-quality-ch
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Python suite | `pytest` | 263 passed, 12 skipped |
+| Python suite | `pytest` | 283 passed, 12 skipped |
 | Migrations | `pytest tests/test_migrations.py` | 8 passed |
 | Engine evaluation | `python -m services.evaluation.harness` | pass, 0 invalid events, 0 knowledge leaks, 0 branch leaks, all six invariants true |
 | Director evaluation | `python -m services.evaluation.director` | 8/8 scenarios |
@@ -581,6 +581,43 @@ The suite skips when the variable is unset or the database is unreachable, and i
 
 ## Recent Changes
 
+### Review fixes to the P0 work
+
+The P0 fixes were reviewed adversarially after landing and three defects were
+found in them — two of them in the security controls themselves. All three are
+fixed here; the details are below because the failure modes are the useful part.
+
+**The decompression ceiling rejected valid cards.** `_bounded_inflate` fed zlib
+slices of the original buffer but never drained `unconsumed_tail`. When
+`max_length` halts decompression, zlib parks the unused input there and stops;
+it has to be fed back before the stream advances. Not doing so meant `eof` was
+never reached, and a 1 MiB payload compressing to 1 KiB was refused as
+"truncated". Repetitive data spans the most steps, which is the shape of a real
+character description — so the DoS defence was a card rejecter. Now the tail is
+fed back, with round-trip coverage at 1, 3, and 4 MB, exactly at the ceiling, one
+byte over, and empty.
+
+**Possession could be bypassed through `relationship_changed`.** The check read
+`character_id` and `entity_id`, but the fields the engine validates are
+`character_id`, `source_character_id`, and `target_character_id` — and
+`relationship_changed` names two characters precisely that way. The model could
+therefore rewrite the user's relationships with no check performed at all. Both
+positions are now covered.
+
+**Agency grounding was satisfiable for free.** Requiring only that one action
+word appear in the user's input is not an enforcement mechanism, it is a
+suggestion the model can meet for free by appending irreversible acts to a
+legitimate clause: "opens the drawer, retrieves the ledger, burns it" matched
+"drawer" and passed. The budget is now on words the input does *not* explain, so
+adding an unasked act costs budget whether or not a grounded verb is present.
+
+**Speech also produced a phantom goal.** `last_action` feeds `_goal_for` in the
+Director, which turns any non-empty value into `"continue: <action>"` and passes
+it to the Performer as beat direction. Storing the placeholder `"spoke"`
+therefore produced `"continue: spoke"` — a real-looking instruction describing
+nothing, displacing a usable fallback. Speech now stores nothing; `last_action_type`
+still records that something happened.
+
 ### P0 dogfood blockers
 
 Seven defects found by external validation, each reproduced with a failing
@@ -591,10 +628,11 @@ regression test before being fixed.
 engine accepts. Because claim validation is all-or-nothing, a schema-compliant
 model producing one of those names lost the entire turn, including the prose:
 picking up a locket could not be committed. Both schemas now derive their enum
-from a single `MODEL_WRITABLE_EVENT_TYPES` allowlist, which also stops
-advertising `world_fact_created` (a private belief promoted to canon for every
-viewer). The three names already in the wild are normalised on read, so a model
-carrying a cached prompt degrades instead of returning a 422.
+from a single `MODEL_WRITABLE_EVENT_TYPES` allowlist of the 12 proposable types,
+which also stops advertising the 18 engine-only ones — including
+`world_fact_created`, a private belief promoted to canon for every viewer. The
+three names already in the wild are normalised on read, so a model carrying a
+cached prompt degrades instead of returning a 422.
 
 **Approval gate.** `requires_approval` gated on any consistency other than
 `consistent`, so an ordinary pronoun — `_REFERENT` marks "I follow her down the
@@ -607,25 +645,29 @@ what `docs/INTENT_MODEL.md` already promised.
 **Unbounded zlib.** PNG text chunks were inflated with `zlib.decompress`, which
 has no size ceiling: roughly 16 KiB of upload reached 52 MiB of memory before
 the importer's own limit, and that limit only bounds the *uploaded* file. Replaced
-with a chunked inflate that abandons a bomb at the ceiling. Truncated compressed
-data is now refused too — `decompressobj` otherwise decodes whatever survived, and
-that can still be valid JSON, so a half-written card would import as a real one.
+with a chunked inflate that abandons a bomb at a 4 MiB ceiling on the
+*decompressed* size. Truncated compressed data is refused too — `decompressobj`
+otherwise decodes whatever survived, which for a card payload can still be valid
+JSON, so a half-written card imported as a real one.
 
 **`last_action` persistence.** Raw speech was written into character state, then
 re-projected into every later snapshot and re-inserted into every subsequent
 prompt. A single secret spoken quietly to one person became a permanent,
 undetectable leak into every other character's context on every following turn.
-Speech events now store a content-free label. Observable performed actions are
-kept, because continuity depends on them and dropping them buys no isolation.
+Speech events now store nothing at all. Observable performed actions are kept,
+because continuity depends on them and dropping them buys no isolation.
 
 **Possession enforcement.** `check_user_agency` decided whether the Performer
 had taken over the user's character by reading `turn.kind` — a field the model
 fills in. Relabelling a decision as `reaction` bypassed the check and committed
 an invented decision as an authoritative `user_action` for a character the user
 owns. Authority is now never derived from `kind`; enforcement is grounding in the
-user's own input, the one statement of intent the model did not author. The check
-also now covers `proposed_events` and `state_claims`, which named possessed
-characters directly while going unchecked entirely.
+user's own input, the one statement of intent the model did not author. An action
+passes when at most two of its distinctive words go unexplained by that input,
+which absorbs paraphrase ("draws the drawer open") and short connective clauses
+while a real takeover leaves four or five. The check also covers
+`proposed_events` and `state_claims` across every field through which a claim can
+name a character.
 
 **Provider warning.** Nothing told the user that no model was configured, so a
 fresh install looked like a working app that was silently echoing input back. The
@@ -725,18 +767,14 @@ Current state of this repository:
 ```text
 origin   https://github.com/sanskar-IT/RP-studios.git
 branch   master            f672eff  feat: establish narrative studio engine
-         fix/p0-dogfood-blockers   429122d  fix: clear the P0 dogfood blockers
+                         429122d  fix: clear the P0 dogfood blockers
+                         8588406  docs: record the P0 dogfood fixes
+                         <next>   fix: close review defects in the P0 fixes
 ```
 
-`master` and `origin/master` both point at `f672eff`; the P0 work exists only on
-`fix/p0-dogfood-blockers`, which is not yet on the remote. Merge it with a fast
-forward once the review is done:
-
-```text
-git checkout master
-git merge --ff-only fix/p0-dogfood-blockers
-git push origin master
-```
+History is linear on `master`, each commit fast-forwarded from the last. The
+`fix/p0-dogfood-blockers` branch used during development has been merged and is
+no longer needed.
 
 For an existing repository, inspect the remote and history before pushing:
 

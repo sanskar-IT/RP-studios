@@ -297,7 +297,14 @@ retrieving more memory cannot silently activate more lore.
 `apply_event` records a `last_action` for the four action-bearing event types, and
 that field is re-projected into every subsequent state snapshot and inserted into
 every character's brief. For `character_spoke`, `user_action`, and `ai_action` it
-therefore stores a content-free label (`"spoke"`, `"acted"`) rather than the text.
+therefore stores **nothing** rather than the text.
+
+Empty rather than a placeholder like `"spoke"`, because the field is read as
+intent. `_goal_for` in the Director turns any non-empty `last_action` into
+`"continue: <action>"`, which reaches the Performer as beat direction — so a
+placeholder would produce `"continue: spoke"`, an instruction that looks real
+while describing nothing, displacing the usable fallback. `last_action_type` still
+records that something happened; the event log still holds the utterance.
 
 This is a knowledge-isolation measure, not a compression choice. Retaining the words
 made a one-turn leak permanent: a secret spoken quietly to one person was re-read
@@ -309,6 +316,23 @@ the content forward.
 `character_performed_action` keeps its text. Anything in the room can witness a
 visible act, so there is no isolation to be gained by dropping it, and continuity
 ("where did the locket go?") depends on it.
+
+### 2.3.1a A placeholder label is still a positive claim
+
+Storing `"spoke"` instead of the text closes the content leak and introduces a
+different defect. `last_action` is not only displayed — it is read as *intent*.
+`_goal_for` in the Director turns any non-empty value into `"continue: <action>"`,
+and `_observable_goal_for` does the same for the viewer-scoped brief. Both reach
+the Performer as beat direction.
+
+So `"spoke"` produced the goal `"continue: spoke"`: an instruction that reads as
+real while describing nothing, and that displaces `"observe and respond to the
+current situation"` — a fallback that at least tells the Performer something true.
+
+The field stores **empty** for speech. Emptiness is read as "no known action",
+which is the accurate statement: the engine cannot derive a goal for a character
+from the fact that they said something. `last_action_type` retains the type, so the
+event is still discoverable.
 
 ### 2.3.2 In-window exposure is still open
 

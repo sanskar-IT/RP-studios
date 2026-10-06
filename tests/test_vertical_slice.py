@@ -277,7 +277,11 @@ async def test_actor_selection_uses_provider_choice_and_explicit_override(sessio
     provider_pipeline.approve_scene(project_id=project.id, scene_id=scene.id)
     selected = await provider_pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
     assert selected.structured_output["selected_actor"] == detective.id
-    assert selected.state["characters"][detective.id]["last_action"]
+    # The actor is selected and recorded. This turn's only event is
+    # character_spoke, which deliberately stores no content in last_action — see
+    # test_speech_leaves_no_phantom_goal_for_the_director_to_act_on.
+    assert selected.state["characters"][detective.id]["last_action_type"] == "character_spoke"
+    assert not selected.state["characters"][detective.id]["last_action"]
 
     override_pipeline = NarrativePipeline(session, fixture_provider("normal_turn.json"))
     overridden = await override_pipeline.continue_scene(
