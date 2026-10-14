@@ -26,22 +26,29 @@ The current repository contains the MVP foundation and first complete narrative 
 
 ## Verification Status
 
-Last full run on the `fix/p0-dogfood-blockers` branch. Every number below was
-produced by the commands in [Testing and Quality Checks](#testing-and-quality-checks).
+Every number below was produced on Windows 11 by the commands in
+[Testing and Quality Checks](#testing-and-quality-checks), against a fresh
+virtual environment created from `.env.example`.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Python suite | `pytest` | 283 passed, 12 skipped |
+| Python suite | `pytest` | 344 passed, 13 skipped |
 | Migrations | `pytest tests/test_migrations.py` | 8 passed |
-| Engine evaluation | `python -m services.evaluation.harness` | pass, 0 invalid events, 0 knowledge leaks, 0 branch leaks, all six invariants true |
-| Director evaluation | `python -m services.evaluation.director` | 8/8 scenarios |
-| Performer evaluation | `python -m services.evaluation.performer` | 10/10 scenarios |
-| Lint | `ruff check apps services packages tests` | clean |
+| Engine evaluation | `python -m services.evaluation.harness --print` | 20/20 runs pass (5 scenarios at 10, 25, 50, 100 turns), 0 invalid events, 0 knowledge leaks, 0 branch leaks |
+| Director evaluation | `python -m services.evaluation.director --print` | 8/8 scenarios |
+| Performer evaluation | `python -m services.evaluation.performer --print` | 10/10 scenarios |
+| Lint | `ruff check apps services packages tests alembic` | clean |
 | Types | `mypy apps services packages` | clean, 56 files |
 | Web types and build | `npm run web:lint`, `npm run web:build` | clean |
+| API startup and one full turn | `uvicorn`, then stage, approve, continue, inspect | 3 events committed, `adapter: heuristic` |
+
+The API startup check ran against SQLite because no PostgreSQL server was
+available on that machine. The engine is the same code on both; the Postgres
+suite below is the one that covers what SQLite does not reproduce.
 
 These suites assert behaviour against scripted providers. **Passing them is not
-a claim that the prose is good** — that still needs a human reading the output.
+a claim that the prose is good.** That still needs a human reading the output,
+and the heuristic provider writes templated text by design.
 
 There is no JavaScript test runner. Frontend behaviour is covered by server
 contract tests plus type checking and a successful build, so UI regressions are
@@ -57,6 +64,7 @@ verified manually rather than automatically.
 | `creator_notes` and card text reach prompts without a trust boundary; over-long card descriptions are rejected rather than truncated | Open. Needs a trust-boundary design, not a patch |
 | Context budget can starve character state, and trims the knowledge guardrail it still describes as exhaustive | Open |
 | Performer output is never validated against the Director constraint envelope; exclusions are prompt-only | Open |
+| Structured output is prompt-injected and parsed with a bare `json.loads`; no `response_format`, no fence stripping, no retry, so a model that wraps JSON in a markdown fence fails the generation | Open. A 4B model returned a complete and correct object inside a fence. Ollama supports `response_format` natively and the adapter does not use it yet. See `docs/PROVIDERS.md` |
 | `active_director_plan` has no timeline predicate after a fork | Open |
 | No CI workflow | Open |
 
@@ -95,6 +103,88 @@ Premise
   -> render
 ```
 
+The first four steps are the setup boundary. A staged scene cannot continue
+until you record the approval, so an underspecified premise never becomes a
+committed event by accident. See [Architecture](#architecture) for the same flow
+with the decision points drawn.
+
+## Architecture
+
+Two processes and one database. There is no message queue and no worker pool:
+a turn is a single request that runs the pipeline synchronously and commits when
+it finishes.
+
+```mermaid
+flowchart LR
+  U["You"] --> W
+  subgraph dev["Local development"]
+    W["React studio<br/>Vite on :5173"] -->|"/api proxy"| A["FastAPI<br/>uvicorn on :8000"]
+  end
+  subgraph docker["Docker Compose"]
+    W2["nginx serving<br/>built studio on :5173"] -->|"/api proxy"| A2["FastAPI<br/>in container"]
+  end
+  A --> P["Provider<br/>heuristic or OpenAI-compatible"]
+  A2 --> P
+  A --> DB[("PostgreSQL 16<br/>pgvector")]
+  A2 --> DB
+```
+
+The two setup paths differ only in who starts the API process and the database.
+The Python code is identical in both.
+
+Inside one API process, a turn moves through four layers. Each one has a single
+job and hands a validated result to the next.
+
+```mermaid
+flowchart TB
+  R["Request<br/>/scenes/:id/continue"] --> RT["Intent Router<br/>pure function, no provider call"]
+  RT -->|assigns a lane| DIR["Director<br/>runs every turn"]
+  DIR -->|lanes 1 and 2<br/>no plan, intent recorded in trace| PER["Performer<br/>writes one turn of prose"]
+  DIR -->|lanes 3 and 4<br/>plan, validate, gate on approval| PER
+  PER --> VAL["Claim validation<br/>participation, agency, off-stage, off-screen"]
+  VAL -->|rejected| REJ["Recorded as rejected<br/>no events committed"]
+  VAL -->|accepted| EXT["State extraction<br/>events, claims, memories, lore"]
+  EXT --> COMMIT["Append-only commit<br/>event log plus checkpoint"]
+  COMMIT --> RENDER["Render for the UI"]
+  VAL --> TR[("Trace<br/>context, verdicts, timing")]
+  COMMIT --> TR
+```
+
+### Why a turn is not one call to a model
+
+The Performer proposes and never commits. Everything the model returns is a
+claim that has to survive four checks before it becomes an event, because the
+model fills in the fields that would otherwise enforce the rules. `kind` is
+model-authored, so possession authority is decided from the user's own input
+instead. The event vocabulary the model is shown is derived from the enum the
+engine accepts, so a schema-compliant name cannot be rejected wholesale.
+
+### Context is a priority ladder, not a truncation
+
+A prompt is assembled from independently sourced facts, each tagged with a
+priority. When the token budget runs out, the assembler drops or summarises from
+the bottom of the ladder up and records why, so the context panel can answer
+"why is this not in the prompt".
+
+```mermaid
+flowchart LR
+  S0["0 system rules"] --> S1["1 user instruction"] --> S2["2 scene state"] --> S3["3 character state"] --> S4["4 character knowledge"] --> S5["5 commitments"] --> S6["6 recent events"] --> S7["7 memories"] --> S8["8 lore"] --> S9["9 history"] --> S10["10 flavor"] --> CUT["cut here<br/>when the budget is spent"]
+```
+
+### Branching never edits history
+
+A fork copies an immutable source node into a new timeline and appends only to
+the branch. Character state is a derived projection that can be rebuilt from
+events, so the source timeline is never rewritten.
+
+```mermaid
+flowchart LR
+  T1["Timeline A"] --> N1["node 1"] --> N2["node 2"] --> N3["node 3"]
+  N2 -.->|"fork from node 2"| B1["Timeline B root<br/>checkpoint copied"]
+  B1 --> B2["node 2b"] --> B3["node 3b"]
+  N3 --> N4["node 4<br/>unchanged"]
+```
+
 ## Technology
 
 - Python 3.12 or newer
@@ -131,83 +221,108 @@ docs/                  Product, API, and architecture documentation
 
 ## Requirements
 
-Choose one of the following setups:
+Pick one row. Both paths run the same code and serve the same studio.
 
-### Docker setup
+| | [Docker Compose](#quick-start-with-docker) | [Local development](#local-development) |
+| --- | --- | --- |
+| Install | Docker Desktop | Python 3.12+, Node.js 20+, PostgreSQL 16 |
+| Processes you start | one | three (database, API, studio) |
+| Reloads code on save | no, rebuild the image | yes |
+| Good for | trying it, deploying it | working on it |
 
-- Docker Desktop or Docker Engine
-- Docker Compose v2
+PostgreSQL needs the `pgvector` extension. The Compose image already has it.
+For a local install, use the `pgvector/pgvector:pg16` image through
+`docker compose up -d postgres` rather than installing the extension by hand.
 
-### Local setup
-
-- Python 3.12 or newer
-- Node.js 20 or newer
-- PostgreSQL 16 with pgvector, or Docker for PostgreSQL
-- npm
+Node.js 20 or newer is required. The workspace uses npm workspaces, so run
+`npm install` once at the repository root.
 
 ## Quick Start with Docker
 
-Docker Compose starts PostgreSQL with pgvector, applies migrations, starts the API, and serves the built studio through nginx.
+Docker Compose starts PostgreSQL with pgvector, applies migrations, starts the
+API, and serves the built studio through nginx.
+
+### Windows (PowerShell)
 
 1. Copy the environment template:
-
-   ```text
-   cp .env.example .env
-   ```
-
-   On Windows PowerShell:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-2. Review `.env`. The default provider is the deterministic heuristic provider, so no model account is required for the first run. Docker uses the internal `postgres` hostname for its database; the database URL in `.env` is for a locally running API. Provider settings from `.env` are passed into the Compose API service.
+2. Build and start the stack. The first build takes a few minutes:
 
-3. Build and start the stack:
-
-   ```text
+   ```powershell
    docker compose up --build
    ```
 
-4. Open the studio:
+3. Open the studio at <http://localhost:5173> and the API docs at
+   <http://localhost:8000/docs>.
 
-   ```text
-   http://localhost:5173
-   ```
+4. Stop the services:
 
-5. Open API documentation:
-
-   ```text
-   http://localhost:8000/docs
-   ```
-
-6. Stop the services when finished:
-
-   ```text
+   ```powershell
    docker compose down
    ```
 
-To remove the local PostgreSQL volume as well, use `docker compose down -v`. This deletes local narrative data.
+   Add `-v` to also delete the PostgreSQL volume, which destroys your local
+   narrative data.
+
+### macOS and Linux
+
+1. Copy the environment template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Build and start the stack:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Open the studio at <http://localhost:5173> and the API docs at
+   <http://localhost:8000/docs>.
+
+4. Stop the services with `docker compose down`. Add `-v` to delete the
+   PostgreSQL volume too.
+
+### About `.env` on this path
+
+You do not need to edit it. The default provider is the deterministic heuristic
+provider, so the first run needs no model account. Provider settings from `.env`
+are passed into the Compose API service, so adding a key there is enough to
+switch providers without rebuilding.
+
+The database URL in `.env` is for a locally running API. Compose overrides it
+with the internal `postgres` hostname, which only resolves inside the network.
 
 ## Local Development
 
+You run three processes: the database, the API, and the studio. Keep three
+terminals open.
+
 ### 1. Create a Python environment
 
-```text
+Windows (PowerShell):
+
+```powershell
 python -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-Activate it on macOS or Linux:
+macOS and Linux:
 
-```text
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Activate it in Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
+If PowerShell blocks the activation script with an execution-policy error, either
+run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or skip activation
+and call the interpreter directly as `.venv\Scripts\python.exe` in the commands
+below. Both work.
 
 ### 2. Install Python dependencies
 
@@ -216,48 +331,78 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
+The `[dev]` extra brings pytest, ruff, and mypy. Without it the app still runs
+and the test commands are unavailable.
+
 ### 3. Configure the environment
 
-```text
-cp .env.example .env
-```
-
-On Windows PowerShell:
+Windows (PowerShell):
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Until a provider key is configured, the studio displays a banner stating that
-responses are templated rather than written. This is expected on a fresh
-installation.
+macOS and Linux:
 
-The API reads environment variables with the `NARRATIVE_` prefix. The important settings are:
+```bash
+cp .env.example .env
+```
+
+The file works as copied. It ships the heuristic provider and leaves credentials
+empty, so nothing has to be filled in before the first run.
+
+Until you configure a provider key, the studio shows a banner saying responses
+are templated rather than written. That is expected on a fresh install.
+
+The API reads environment variables with the `NARRATIVE_` prefix, and `.env` is
+loaded automatically. Settings are read once at process startup, so restart the
+API after editing it. The important ones:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `NARRATIVE_DATABASE_URL` | SQLAlchemy PostgreSQL URL | Local `narrative` database |
+| `NARRATIVE_DATABASE_URL` | SQLAlchemy URL, PostgreSQL or SQLite | Local `narrative` database |
 | `NARRATIVE_CORS_ORIGINS` | Comma-separated allowed web origins | `http://localhost:5173` |
-| `NARRATIVE_PROVIDER` | `heuristic` or `openai_compatible` | `heuristic` |
-| `NARRATIVE_PROVIDER_BASE_URL` | OpenAI-compatible API base URL | Empty |
+| `NARRATIVE_PROVIDER` | `heuristic`, `openai_compatible`, `openai-compatible`, `local`, `ollama`, or `generic`; anything else falls back to `heuristic` | `heuristic` |
+| `NARRATIVE_PROVIDER_BASE_URL` | OpenAI-compatible API base URL; must include any `/v1` prefix | Empty |
 | `NARRATIVE_PROVIDER_MODEL` | Model identifier sent to the provider | Empty |
-| `NARRATIVE_PROVIDER_API_KEY` | Provider credential read from the environment | Empty |
-| `NARRATIVE_PROVIDER_CONTEXT_WINDOW` | Declared context window in tokens; 0 means the conservative default | `0` |
-| `NARRATIVE_PROVIDER_MAX_OUTPUT_TOKENS` | Reserved output budget in tokens; 0 means the default | `0` |
-| `NARRATIVE_PROVIDER_FEATURES` | Comma-separated declared features (`structured_output`, `streaming`, `tools`, `json_mode`, `embeddings`) | Empty |
+| `NARRATIVE_PROVIDER_API_KEY` | Provider credential read from the environment; leave empty for local servers | Empty |
+| `NARRATIVE_PROVIDER_CONTEXT_WINDOW` | Declared context window in tokens; `0` uses the conservative default | `0` |
+| `NARRATIVE_PROVIDER_MAX_OUTPUT_TOKENS` | Reserved output budget in tokens; `0` uses the default | `0` |
+| `NARRATIVE_PROVIDER_FEATURES` | Comma-separated declared features (`structured_output`, `streaming`, `tools`, `json_mode`, `embeddings`); declaration only, it does not change the request | Empty |
+| `NARRATIVE_PROVIDER_TIMEOUT_SECONDS` | Per-request provider timeout in seconds; raise it for CPU-only local inference | `120` |
 | `NARRATIVE_MEMORY_RETRIEVAL_LIMIT` | Memories injected per turn | `10` |
 | `NARRATIVE_MEMORY_CANDIDATE_POOL` | Candidate pool ranked per retrieval | `400` |
-| `NARRATIVE_LORE_TOKEN_BUDGET` | Legacy lore budget hint; lore is additionally capped at a fifth of the input budget | `2048` |
+| `NARRATIVE_LORE_TOKEN_BUDGET` | Lore budget hint; lore is additionally capped at a fifth of the input budget | `2048` |
 | `NARRATIVE_AUTO_CREATE_SCHEMA` | Create tables on API startup | `false` |
 
-Keep `NARRATIVE_AUTO_CREATE_SCHEMA=false` for normal development and use Alembic for schema changes.
+The two numeric provider fields accept an empty value, which means "not
+declared" and falls back to the conservative default.
+
+Keep `NARRATIVE_AUTO_CREATE_SCHEMA=false` and use Alembic for schema changes.
 
 ### 4. Start PostgreSQL
 
-If PostgreSQL is available locally, create a database matching the URL in `.env`. Otherwise start only the Compose database:
+If you have PostgreSQL 16 with pgvector installed, create a database matching the
+URL in `.env`. Otherwise start only the Compose database, which needs Docker but
+not the full stack:
 
 ```text
 docker compose up -d postgres
+```
+
+To skip PostgreSQL entirely, point the API at SQLite. This is enough for the UI,
+the heuristic provider, and local exploration. It does not reproduce
+`pgvector`, immediate foreign key enforcement, or partial unique indexes, so run
+the [opt-in PostgreSQL suite](#the-opt-in-postgresql-suite) before trusting
+anything those affect. An environment variable wins over the same key in
+`.env`, so this overrides the Postgres URL copied in step 3 for this shell:
+
+```bash
+export NARRATIVE_DATABASE_URL=sqlite:///./narrative.db
+```
+
+```powershell
+$env:NARRATIVE_DATABASE_URL = "sqlite:///./narrative.db"
 ```
 
 ### 5. Apply migrations
@@ -266,28 +411,43 @@ docker compose up -d postgres
 alembic upgrade head
 ```
 
+Alembic reads the same `NARRATIVE_DATABASE_URL`, so it migrates whatever
+database you configured.
+
 ### 6. Start the API
 
 ```text
 uvicorn apps.api.app.main:app --reload --port 8000
 ```
 
-The health endpoint is available at `http://localhost:8000/health`.
+Check `http://localhost:8000/health`. It returns `{"status":"ok"}` once the
+process is serving.
 
 ### 7. Start the web studio
 
-In a second terminal:
+In a second terminal, from the repository root:
 
 ```text
 npm install
 npm run web:dev
 ```
 
-Open `http://localhost:5173`.
+Open <http://localhost:5173>. Use `localhost`, not `127.0.0.1`: Vite binds to
+the `localhost` hostname, and the IP form can fail to connect on Windows.
+
+### What you should see
+
+The studio loads with a provider banner saying responses are templated, because
+no model is configured. Create a project, add a character, enter a premise in
+the staging surface, and accept the proposal. Continue the scene and the
+timeline records the turn. With the heuristic provider the prose is templated,
+so read it as a demonstration that the pipeline runs, not as writing quality.
 
 ## Provider Configuration
 
-The heuristic provider is the default because it works without a network connection and makes the core workflow deterministic. It returns a small structured response so the event and state pipeline can be exercised locally.
+The heuristic provider is the default because it works without a network
+connection and makes the core workflow deterministic. It returns a small
+structured response so the event and state pipeline can be exercised locally.
 
 To use an OpenAI-compatible endpoint, set these values in `.env`:
 
@@ -298,7 +458,11 @@ NARRATIVE_PROVIDER_MODEL=your-model-name
 NARRATIVE_PROVIDER_API_KEY=your-key-from-a-secret-store
 ```
 
-The adapter expects an endpoint that provides an OpenAI-compatible `/chat/completions` contract. It can represent local inference servers and compatible gateways without changing narrative code.
+Restart the API afterwards, then confirm the studio's provider banner clears.
+
+The adapter expects an endpoint that provides an OpenAI-compatible
+`/chat/completions` contract. It can represent local inference servers and
+compatible gateways without changing narrative code.
 
 Provider credentials are configuration only. They must not be placed in:
 
@@ -310,7 +474,49 @@ Provider credentials are configuration only. They must not be placed in:
 - Client-side environment variables
 - Logs or error messages
 
-Do not commit a real API key. `.env` and common local secret formats are ignored. `.env.example` is intentionally tracked and contains empty configuration values only.
+Do not commit a real API key. `.env` and common local secret formats are
+ignored. `.env.example` is intentionally tracked and contains empty
+configuration values only.
+
+### Local models with Ollama (no API key, no cost)
+
+Ollama's OpenAI-compatible endpoint is the zero-cost path. No account, no key,
+nothing billed. Pull a model, run the server, and set four variables.
+Which model is your choice: an uncensored model, a larger instruction-following
+model, or a small fast one all work through the same variables. Two properties
+matter for this engine. The model must follow a "return only JSON" instruction,
+because the adapter asks for structured output through the prompt rather than
+through `response_format`. And its context window must cover the prompts the
+assembler builds; check `GET /api/providers/capabilities` if turns fail.
+
+```text
+ollama pull <your-model>
+ollama serve
+```
+
+```text
+NARRATIVE_PROVIDER=ollama
+NARRATIVE_PROVIDER_BASE_URL=http://localhost:11434/v1
+NARRATIVE_PROVIDER_MODEL=<your-model>
+NARRATIVE_PROVIDER_API_KEY=
+NARRATIVE_PROVIDER_CONTEXT_WINDOW=4096
+NARRATIVE_PROVIDER_TIMEOUT_SECONDS=600
+```
+
+The base URL must end in `/v1`; without it every request 404s. Leave the API key
+empty, because local Ollama ignores it. `NARRATIVE_PROVIDER_CONTEXT_WINDOW` must
+match Ollama's `num_ctx`, which defaults to 4096; the studio's own default of 8192
+would let the assembler build prompts the server rejects. `docs/PROVIDERS.md`
+covers the larger-context recipe and the structured-output limitation in full.
+
+One caveat worth knowing before your first turn. The adapter used to send two
+leading system messages on every structured call, which Ollama rejects with HTTP
+500; that is fixed. What remains is that this adapter asks for JSON through the
+prompt rather than through `response_format`, so a model that wraps its reply in
+a markdown fence fails the generation. A 4B model returned a complete, correct
+staging object inside a ```` ```json ```` fence while being told not to, so this
+is the most likely thing to stop your first turn. `docs/PROVIDERS.md` records the
+reproduction and what it looks like.
 
 ## Using the Studio
 
@@ -555,6 +761,22 @@ Run the opt-in live provider test only when a compatible endpoint is configured:
 pytest -m smoke
 ```
 
+This includes `tests/test_local_smoke.py`, a repeatable dogfooding scenario that
+needs no paid credentials. It builds three characters with separate private
+knowledge, possesses one of them, and runs one turn per character against a live
+local model through the real pipeline. Both smoke tests self-skip when no provider
+is configured, so an unconfigured machine sees skips rather than failures.
+
+Set `NARRATIVE_PROVIDER`, `NARRATIVE_PROVIDER_BASE_URL`, and
+`NARRATIVE_PROVIDER_MODEL` in the environment to enable them. See
+`docs/PROVIDERS.md` for the Ollama block.
+
+**A green smoke run is a wiring check, not a quality check.** It confirms the
+endpoint answers and that the engine commits or refuses cleanly. It does not
+establish that the prose is good, and it does not establish that the model kept a
+character's private knowledge to itself. The scenario reports model-dependent
+findings rather than asserting on them for exactly that reason; read the report.
+
 The deterministic suite runs on SQLite only. Persistence, JSON round-trip, foreign key enforcement, transaction rollback, timeline fork, memory persistence, and the production constraints are also covered against a real PostgreSQL database by an opt-in suite. Point `NARRATIVE_TEST_DATABASE_URL` at a disposable database with pgvector available, then run:
 
 ```text
@@ -580,6 +802,75 @@ The opt-in suite requires `NARRATIVE_TEST_DATABASE_URL` and skips otherwise:
 The suite skips when the variable is unset or the database is unreachable, and it leaves no test data behind. See `docs/DEPLOYMENT.md` for the full procedure.
 
 ## Recent Changes
+
+### Local models can reach the engine
+
+`NARRATIVE_PROVIDER=ollama` did nothing except look correct. The provider name
+set recognised `openai`, `openai_compatible`, `local`, and `generic`, and
+anything outside it fell back to the heuristic provider without raising. So the
+obvious spelling of the obvious provider gave a studio that started cleanly,
+reported `adapter: heuristic`, and never contacted a model. There was no error to
+notice, only a capability report to read carefully. `ollama` and
+`openai-compatible` are now recognised, the set lives in one place instead of
+being duplicated across two call sites, and `tests/test_reliability_routes.py`
+pins every spelling plus the near-miss ones that must still fall back.
+
+Then two things that had to be fixed before any local model could work.
+
+**Two leading system messages.** `structured()` prepended the schema as its own
+system message while the pipeline already sent `SYSTEM_RULES` as one, so every
+structured call went out as `[system, system, user]`. Ollama's llama.cpp chat
+templates accept at most one leading system message and answer with HTTP 500 and
+`Jinja Exception: System message must be at the beginning.` This was not a weak
+model: no structured call could succeed against a stock local server at any model
+size, and no configuration setting could reach it. The instruction is now folded
+into the caller's leading system messages, so one goes on the wire with the schema
+still first. Verified against Ollama 0.34.0, where the same request went from 500
+to a well-formed staging object.
+
+**A live smoke test that reported healthy endpoints as broken.** The opt-in
+provider smoke test asked for a one-word answer with `max_tokens=8`. Any
+reasoning-capable model spends that budget on thinking before it emits a single
+answer token, returns an empty completion, and the test fails against a server
+that was answering perfectly well. Raised to 512.
+
+Two configuration gaps came with this. `NARRATIVE_PROVIDER_TIMEOUT_SECONDS` is
+new, because the previous 120 second default is short for CPU-only inference and
+had no way to be expressed at all. And `docker-compose.yml` forwarded the four
+original provider variables but not `CONTEXT_WINDOW`, `MAX_OUTPUT_TOKENS`, or
+`FEATURES`, so a Compose deployment silently kept the conservative 8192-token
+window while a local server defaults to 4096.
+
+`tests/test_local_smoke.py` is the new dogfooding scenario: three characters with
+separate private knowledge, one of them user-possessed, one turn each against a
+live local model. Its assertions cover seeding, possession, and prompt assembly.
+Everything that depends on the model is reported rather than asserted, and a run
+in which no turn committed fails loudly instead of passing quietly, because a
+green tick there would mean nothing was tested.
+
+### `.env.example` now loads as copied
+
+`NARRATIVE_PROVIDER_CONTEXT_WINDOW` and `NARRATIVE_PROVIDER_MAX_OUTPUT_TOKENS`
+are declared as empty strings in the template, because they are optional. Pydantic
+read those as invalid integers and raised at import, so the first documented
+setup step, copying `.env.example` to `.env`, made the API fail to start before
+anything else ran. Both fields now treat an empty or whitespace-only value as
+"not declared" and fall back to `0`, which is what the documented default
+already was. A genuinely non-numeric value is still an error, since that is a
+typo rather than an unset field. `tests/test_config.py` covers all four cases,
+and the env-file load is what the first test reproduces.
+
+### Empty completions now fail with the real cause
+
+A thinking model that spends its whole budget on reasoning returns `content:
+null`, with the reply sitting in a `reasoning` field the adapter does not read.
+The adapter stringified that null into the literal word "None", so the turn
+failed later at JSON parsing with a message about structured output that
+pointed away from the cause. `generate()` now raises `ProviderError: Provider
+returned an empty completion` on a null, empty, or blank content, and the error
+names the fix: raise `max_tokens` or disable thinking. The old test asserted
+the stringification; it now asserts the error across all three shapes.
+`docs/PROVIDERS.md` records the open `reasoning` field work this does not fix.
 
 ### Review fixes to the P0 work
 
@@ -787,17 +1078,74 @@ Do not force-push a shared branch. If the remote already contains history, fetch
 
 ## Troubleshooting
 
+Start with the setup path that matches your symptom.
+
+### The API will not start after copying `.env.example`
+
+Check whether you are running from the repository root. `Settings` loads `.env`
+relative to the working directory, so starting uvicorn from a subdirectory finds
+no file and falls back to the defaults, which point at a PostgreSQL server that
+is not there. A `ValidationError` mentioning `provider_context_window` means an
+older copy of `apps/api/app/config.py` that does not accept an empty value.
+
+### `Activate.ps1` is refused on Windows
+
+PowerShell blocks the activation script under a restrictive execution policy.
+Either run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or skip
+activation and call `.venv\Scripts\python.exe` directly. Both give you the same
+interpreter.
+
+### `localhost:5173` refuses to connect
+
+Use `localhost`, not `127.0.0.1`. Vite binds to the `localhost` hostname, and
+the IP form can fail on Windows. If the port is taken, Vite picks the next free
+one and prints it; the studio's API proxy follows the config, not the port.
+
+### The studio says responses are templated
+
+No provider is configured, so the heuristic provider is running. That is the
+expected first-run state. See
+[Provider Configuration](#provider-configuration).
+
 ### Database connection fails
 
-Confirm PostgreSQL is running and that `NARRATIVE_DATABASE_URL` uses the `NARRATIVE_` prefix. The API expects a SQLAlchemy URL such as `postgresql+psycopg://...`.
+Confirm PostgreSQL is running and that `NARRATIVE_DATABASE_URL` uses the
+`NARRATIVE_` prefix. The API expects a SQLAlchemy URL such as
+`postgresql+psycopg://...`. For a database-free first look, point it at SQLite
+as described in step 4 of [Local Development](#local-development).
+
+### Tables are missing after starting the API
+
+The API does not create tables. Run `alembic upgrade head` before starting it,
+or set `NARRATIVE_AUTO_CREATE_SCHEMA=true` for a throwaway local database.
 
 ### The web page loads but API calls fail
 
-Run the API on port 8000 and keep the Vite proxy configuration intact. Check `http://localhost:8000/health` and the browser network panel.
+Run the API on port 8000 and keep the Vite proxy configuration intact. Check
+`http://localhost:8000/health` and the browser network panel.
 
 ### Provider configuration is ignored
 
-The API reads settings from the environment at process startup. Restart the API after changing `.env`. Confirm the provider name, base URL, and model are all set for `openai_compatible`.
+The API reads settings from the environment at process startup. Restart the API
+after changing `.env`. Confirm the provider name, base URL, and model are all
+set for `openai_compatible` or `ollama`. Check `/api/providers/capabilities`: an
+`adapter` of `heuristic` means the API did not read your change, or the provider
+name did not match a known value and the studio silently fell back to the offline
+default.
+
+### A local model returns a failed generation
+
+Almost always the structured-output path, not the connection. The adapter asks
+for JSON through the prompt rather than through `response_format`, so a model
+that wraps its reply in a markdown fence, or comments before the JSON, produces
+something `json.loads` rejects. The generation is recorded as failed, nothing is
+committed, and there is no automatic retry.
+
+Read `generations.error` before changing anything. If it names the provider
+request rather than the JSON, check the base URL for the `/v1` suffix and confirm
+the model id matches `ollama list`. If it names structured JSON, the model is the
+problem: lower the temperature expectation, try a model with stronger JSON
+instruction-following, or expect to hit this repeatedly on models below about 8B.
 
 ### A migration fails
 
