@@ -44,6 +44,7 @@ class ScenarioMetrics:
     turns: int
     state_contradictions: int = 0
     knowledge_leaks: int = 0
+    scene_speech_leaks: int = 0
     broken_commitments: int = 0
     invalid_events: int = 0
     branch_leaks: int = 0
@@ -93,6 +94,7 @@ class ScenarioMetrics:
             "passed": self.passed,
             "state_contradictions": self.state_contradictions,
             "knowledge_leaks": self.knowledge_leaks,
+            "scene_speech_leaks": self.scene_speech_leaks,
             "broken_commitments": self.broken_commitments,
             "invalid_events": self.invalid_events,
             "branch_leaks": self.branch_leaks,
@@ -157,6 +159,7 @@ class EvaluationReport:
                 "runs_passed": sum(1 for metrics in self.scenarios if metrics.passed),
                 "state_contradictions": sum(m.state_contradictions for m in self.scenarios),
                 "knowledge_leaks": sum(m.knowledge_leaks for m in self.scenarios),
+                "scene_speech_leaks": sum(m.scene_speech_leaks for m in self.scenarios),
                 "broken_commitments": sum(m.broken_commitments for m in self.scenarios),
                 "invalid_events": sum(m.invalid_events for m in self.scenarios),
                 "branch_leaks": sum(m.branch_leaks for m in self.scenarios),
@@ -184,6 +187,7 @@ class EvaluationReport:
                     [
                         f"State contradictions: {metrics.state_contradictions}",
                         f"Knowledge leaks: {metrics.knowledge_leaks}",
+                        f"Scene speech leaks: {metrics.scene_speech_leaks}",
                         f"Broken commitments: {metrics.broken_commitments}",
                         f"Invalid events: {metrics.invalid_events}",
                         f"Branch leaks: {metrics.branch_leaks}",

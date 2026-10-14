@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app import repository
@@ -288,6 +288,7 @@ PRIVATE_KNOWLEDGE_EVENTS = frozenset(
     {"knowledge_acquired", "knowledge_suspected", "knowledge_refuted"}
 )
 WITHHELD_KNOWLEDGE = "[a fact another character has not shared is withheld]"
+WITHHELD_SPEECH = "[a line spoken where this character was not present is withheld]"
 
 # Events that are spoken aloud. Whatever they state in front of the scene is
 # overheard: listeners gain it as suspicion, never as certainty, because hearing
@@ -470,6 +471,7 @@ class NarrativePipeline:
                 "staging_revision": scene.staging_revision,
             },
             source=EventSource.SYSTEM,
+            scene_id=scene.id,
         )
         self.db.commit()
         return PipelineResult(
@@ -524,6 +526,7 @@ class NarrativePipeline:
                 "staging_revision": scene.staging_revision,
             },
             source=EventSource.USER,
+            scene_id=scene.id,
         )
         self.db.commit()
         return PipelineResult(
@@ -796,7 +799,7 @@ class NarrativePipeline:
                 user_input=user_input,
                 director=director,
                 planner_context=planner_context,
-                recent_events=self._recent_events(scene.timeline_id, actor_id=actor.id if actor else None),
+                recent_events=self._recent_events(scene.timeline_id, scene.id, actor_id=actor.id if actor else None),
                 control_modes=control_modes,
             )
         with timer.measure("context_assembly"):
@@ -1017,6 +1020,7 @@ class NarrativePipeline:
                     # into the column instead of existing only in the payload.
                     actor_character_id=claim_actor or None,
                     idempotency_key=f"{generation.id}:{index}",
+                    scene_id=scene.id,
                 )
                 committed_event_ids.append(event.id)
                 committed_events.append((event_type, payload, event))
@@ -1025,6 +1029,7 @@ class NarrativePipeline:
                 project_id=project_id,
                 generation_id=generation.id,
                 timeline_id=scene.timeline_id,
+                scene_id=scene.id,
                 participant_ids=participant_ids,
                 committed=committed_events,
                 state=state,
@@ -1162,6 +1167,7 @@ class NarrativePipeline:
                 "literal_action": resolved_type == IntentType.IMMEDIATE_ACTION.value,
             },
             source=EventSource.USER,
+            scene_id=scene_id,
         )
         if resolved_type == IntentType.IMMEDIATE_ACTION.value:
             repository.append_event(
@@ -1171,6 +1177,7 @@ class NarrativePipeline:
                 event_type=USER_ACTION,
                 payload={"text": text, "intent_id": intent.id, "immediate": True, "authoritative": True},
                 source=EventSource.USER,
+                scene_id=scene_id,
             )
             intent.status = IntentStatus.COMPLETED.value
             commitment.status = CommitmentStatus.FULFILLED.value
@@ -1321,6 +1328,7 @@ class NarrativePipeline:
             payload={"scene_id": scene_id, "character_id": character_id, "control_mode": ControlMode.USER.value},
             source=EventSource.USER,
             actor_character_id=character_id,
+            scene_id=scene_id,
         )
         self.db.commit()
         return PipelineResult(scene_id=scene_id, timeline_id=scene.timeline_id, state=state.to_dict(), generation_id=event.id)
@@ -1346,6 +1354,7 @@ class NarrativePipeline:
             event_type=POSSESSION_CHANGED,
             payload={"scene_id": scene_id, "character_id": character_id, "control_mode": ControlMode.AI.value},
             source=EventSource.USER,
+            scene_id=scene_id,
         )
         self.db.commit()
         return PipelineResult(scene_id=scene_id, timeline_id=scene.timeline_id, state=state.to_dict())
@@ -1394,6 +1403,7 @@ class NarrativePipeline:
                 "scene_id": generation.scene_id,
             },
             source=EventSource.USER,
+            scene_id=generation.scene_id,
         )
         generation.status = GenerationStatus.REJECTED.value
         generation.error = reason[:500]
@@ -2250,6 +2260,7 @@ class NarrativePipeline:
                     "executed": False,
                 },
                 source=EventSource.USER,
+                scene_id=scene.id,
             )
         return commitment_ids, payloads
 
@@ -2712,19 +2723,32 @@ class NarrativePipeline:
         )
 
     def _recent_events(
-        self, timeline_id: str, *, actor_id: str | None = None, limit: int = RECENT_EVENT_LIMIT
+        self,
+        timeline_id: str,
+        scene_id: str | None,
+        *,
+        actor_id: str | None = None,
+        limit: int = RECENT_EVENT_LIMIT,
     ) -> list[str]:
-        """The tail of the timeline, with other characters' knowledge redacted.
+        """The tail of the active scene, with other characters' knowledge redacted.
 
-        Rendering raw event payloads here leaked knowledge: a
-        ``knowledge_acquired`` event recorded for one character was readable
-        verbatim in another character's prompt. A fact another character has not
-        shared is replaced with a marker, not with the fact.
+        A scene is a trust boundary (ADR 0004): only events attributed to the
+        active scene render, so a line spoken in one scene never appears in
+        another scene's prompts. Rows committed before scene attribution existed
+        carry no scene and still render everywhere; they are legacy, not a
+        second rule. Within the scene, a speech line is visible to a viewer who
+        was present or who spoke it; anyone else gets a marker. Beliefs are
+        never consulted for visibility. Rendering raw event payloads here leaked
+        knowledge: a ``knowledge_acquired`` event recorded for one character was
+        readable verbatim in another character's prompt. A fact another
+        character has not shared is replaced with a marker, not with the fact.
         """
+        present_ids = _scene_participant_ids(self.db, scene_id) if scene_id else set()
         rows = list(
             self.db.scalars(
                 select(Event)
                 .where(Event.timeline_id == timeline_id)
+                .where(or_(Event.scene_id == scene_id, Event.scene_id.is_(None)))
                 .order_by(desc(Event.sequence))
                 .limit(limit)
             )
@@ -2742,6 +2766,14 @@ class NarrativePipeline:
                 summary = json.dumps(payload, sort_keys=True, default=str)[:160]
             if event.event_type in PRIVATE_KNOWLEDGE_EVENTS and payload.get("character_id") != actor_id:
                 summary = WITHHELD_KNOWLEDGE
+            speaker = str(payload.get("character_id") or event.actor_character_id or "")
+            if (
+                event.event_type == "character_spoke"
+                and speaker
+                and speaker != actor_id
+                and actor_id not in present_ids
+            ):
+                summary = WITHHELD_SPEECH
             lines.append(f"#{event.sequence} {event.event_type}: {summary}")
         return lines
 
@@ -2824,7 +2856,7 @@ class NarrativePipeline:
             character_state=character_state,
             knowledge=knowledge.render(),
             commitments="",
-            recent_events=self._recent_events(scene.timeline_id, actor_id=actor.id if actor else None),
+            recent_events=self._recent_events(scene.timeline_id, scene.id, actor_id=actor.id if actor else None),
             memories=memory_lines,
             lore=[(entry.name or entry.entry_id, entry.content) for entry in lore_debug.activated],
             history=self._history_digest(scene.timeline_id),
@@ -2936,6 +2968,7 @@ class NarrativePipeline:
         project_id: str,
         generation_id: str,
         timeline_id: str,
+        scene_id: str | None = None,
         participant_ids: set[str],
         committed: list[tuple[str, dict[str, Any], Any]],
         state: StateSnapshot,
@@ -2986,6 +3019,7 @@ class NarrativePipeline:
                         },
                         source=EventSource.SYSTEM,
                         idempotency_key=f"{generation_id}:overhear:{index}:{listener}:{digest}",
+                        scene_id=scene_id,
                     )
                     new_ids.append(heard.id)
         return new_ids

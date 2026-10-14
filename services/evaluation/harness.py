@@ -51,6 +51,7 @@ from services.evaluation.scenarios import (
     LORE_ACTIVATION,
     MEMORY_RETRIEVAL,
     NO_KNOWLEDGE_LEAK,
+    NO_SCENE_LEAK,
     NO_TRANSCRIPT_AS_MEMORY,
     STATE_CONSISTENT,
     SUSPICION_NOT_CERTAINTY,
@@ -295,6 +296,8 @@ async def _run_scenario(
             failure=failure,
             prompt=provider.prompts[prompt_before] if len(provider.prompts) > prompt_before else "",
             user_input=plan.user_input,
+            scene_id=scene_id,
+            timeline_id=timeline_id,
         )
 
     metrics.memory_rows_written = _memory_count(db, project_id, timeline_id) - memory_rows_at_start
@@ -330,6 +333,8 @@ def _score_turn(
     failure: str,
     prompt: str,
     user_input: str,
+    scene_id: str = "",
+    timeline_id: str = "",
 ) -> None:
     context = (result.context_debug or {}) if result is not None else {}
     trace = pipeline_trace(db, result.generation_id) if (result and result.generation_id) else {}
@@ -365,6 +370,7 @@ def _score_turn(
 
     if prompt:
         _score_knowledge_isolation(db, metrics, turn, prompt, result, user_input)
+        _score_scene_isolation(db, metrics, turn, prompt, timeline_id, scene_id, user_input)
 
     performance = trace.get("performance", {})
     for name, value in (performance.get("by_stage") or {}).items():
@@ -428,6 +434,49 @@ def _score_knowledge_isolation(
     if actor_id in state.dead and not _died_this_turn(db, result):
         metrics.invariants[STATE_CONSISTENT] = False
         metrics.findings.append(f"turn {turn}: dead character {actor_id} was selected to act")
+
+
+def _score_scene_isolation(
+    db: Session,
+    metrics: ScenarioMetrics,
+    turn: int,
+    prompt: str,
+    timeline_id: str,
+    scene_id: str,
+    user_input: str,
+) -> None:
+    """No speech from another scene may reach this prompt (ADR 0004).
+
+    This is the signal ``knowledge_leaks`` could not give: invented dialogue
+    has no belief record, so the belief-based metric reported 0 while a
+    stranger read the secret. Speech committed under a different scene is
+    checked verbatim, because a spoken line is either present or absent.
+
+    The harness runs single-scene scenarios, so on today's fixtures this
+    passes vacuously. The deterministic cross-scene test in
+    tests/test_knowledge_isolation.py is the primary signal; this scorer
+    exists so a multi-scene scenario gets the check without new plumbing.
+    """
+    lowered = prompt.casefold()
+    leaks = 0
+    for row in repository.list_events(db, timeline_id):
+        if row.event_type != "character_spoke":
+            continue
+        if (row.scene_id or None) in (None, scene_id):
+            continue
+        text = str((row.payload or {}).get("text") or "").strip()
+        if not text or text.casefold() not in lowered:
+            continue
+        if claim_states_fact(user_input, text):
+            continue
+        leaks += 1
+        metrics.findings.append(
+            "turn {turn}: speech from another scene reached the prompt "
+            f"(event #{row.sequence})"
+        )
+    if leaks:
+        metrics.scene_speech_leaks += leaks
+        metrics.invariants[NO_SCENE_LEAK] = False
 
 
 def _died_this_turn(db: Session, result: Any) -> bool:

@@ -93,6 +93,7 @@ def _validate() -> None:
 # machine-readable report.
 STATE_CONSISTENT = "state_consistent"
 NO_KNOWLEDGE_LEAK = "no_knowledge_leak"
+NO_SCENE_LEAK = "no_scene_leak"
 MEMORY_RETRIEVAL = "memory_retrieval"
 COMMITMENT_PERSISTENCE = "commitment_persistence"
 BRANCH_CORRECTNESS = "branch_correctness"
@@ -109,6 +110,7 @@ INVARIANT_KINDS = frozenset(
     {
         STATE_CONSISTENT,
         NO_KNOWLEDGE_LEAK,
+        NO_SCENE_LEAK,
         MEMORY_RETRIEVAL,
         COMMITMENT_PERSISTENCE,
         BRANCH_CORRECTNESS,
@@ -462,6 +464,7 @@ MYSTERY = Scenario(
     plan=_mystery_plan,
     invariants=(
         Invariant("no_knowledge_leak", "No character states a fact they have not learned", NO_KNOWLEDGE_LEAK),
+        Invariant("no_scene_leak", "No speech from another scene reaches the prompt", NO_SCENE_LEAK),
         Invariant("suspicion_not_certainty", "Suspicion stays separate from certainty", SUSPICION_NOT_CERTAINTY),
         Invariant("memory_retrieval", "A fact learned at turn 14 is recalled at turn 57", MEMORY_RETRIEVAL),
         Invariant("lore_activation", "Only the library entries activate, not the harbour", LORE_ACTIVATION),
@@ -496,6 +499,7 @@ INTRIGUE = Scenario(
     invariants=(
         Invariant("commitment_persistence", "The betrayal commitment survives many turns", COMMITMENT_PERSISTENCE),
         Invariant("no_knowledge_leak", "The spy's message stays private to the General", NO_KNOWLEDGE_LEAK),
+        Invariant("no_scene_leak", "No speech from another scene reaches the prompt", NO_SCENE_LEAK),
         Invariant("state_consistent", "Relationships accumulate without corrupting the projection", STATE_CONSISTENT),
         Invariant("event_validity", "Every committed event validates", EVENT_VALIDITY),
     ),
@@ -546,6 +550,7 @@ ROMANCE = Scenario(
         Invariant("commitment_persistence", "The waiting commitment survives many turns", COMMITMENT_PERSISTENCE),
         Invariant("state_consistent", "Relationship strength accumulates correctly", STATE_CONSISTENT),
         Invariant("no_knowledge_leak", "Elena's avoidance is not known before she says it", NO_KNOWLEDGE_LEAK),
+        Invariant("no_scene_leak", "No speech from another scene reaches the prompt", NO_SCENE_LEAK),
     ),
 )
 
@@ -575,6 +580,7 @@ CANON = Scenario(
     invariants=(
         Invariant("branch_correctness", "A branch keeps its own world facts and never inherits the other branch's", BRANCH_CORRECTNESS),
         Invariant("no_knowledge_leak", "Imported canon is advisory, not character knowledge", NO_KNOWLEDGE_LEAK),
+        Invariant("no_scene_leak", "No speech from another scene reaches the prompt", NO_SCENE_LEAK),
         Invariant("state_consistent", "World facts created on a branch stay on that branch", STATE_CONSISTENT),
     ),
 )

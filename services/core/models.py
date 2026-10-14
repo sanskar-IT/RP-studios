@@ -262,6 +262,9 @@ class Event(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     timeline_id: Mapped[str] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), index=True)
     node_id: Mapped[str] = mapped_column(ForeignKey("timeline_nodes.id", ondelete="CASCADE"), index=True)
+    scene_id: Mapped[str | None] = mapped_column(
+        ForeignKey("scenes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

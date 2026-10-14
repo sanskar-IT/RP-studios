@@ -510,20 +510,19 @@ async def test_a_secret_spoken_aloud_does_not_survive_in_the_projected_state(ses
 
 
 @pytest.mark.asyncio
-async def test_recent_events_still_expose_speech_within_the_window(session):
-    """Tracked limitation — the *in-window* half of the leak is not yet fixed.
+async def test_recent_events_show_speech_to_characters_present_in_the_scene(session):
+    """Within-room speech is accurate, not a leak (ADR 0004).
 
-    ``last_action`` no longer retains speech, but ``_recent_events`` renders the
-    last few events' text to every character regardless of who was present, and
-    ``_overhear`` grants no suspicion for a paraphrase. So a bystander prompted
-    in the same scene still sees the line.
+    ``last_action`` holds no speech, but ``_recent_events`` renders the last
+    few events' text to every character present in the scene, and ``_overhear``
+    grants no suspicion for a paraphrase. A bystander in the same room still
+    sees the line, because showing speech to a character who was in the room
+    is accurate. The leak ADR 0004 closes is cross-scene, covered by the test
+    below: a line spoken in one scene must not appear in another scene's
+    prompts.
 
-    This test pins the current behaviour on purpose: it fails when someone fixes
-    ``_recent_events`` without also recording the change, and it makes the
-    remaining gap visible instead of leaving it implied by the passing test
-    above. The principled fix is to make ``_overhear`` fail *open* toward
-    suspicion, which is a design change with its own cost — suspicion growth is
-    already unbounded — so it is deliberately out of scope for this milestone.
+    This test pins the within-room behaviour on purpose: it fails when someone
+    changes ``_recent_events`` without also recording the change.
     """
     project = repository.create_project(session, "Window")
     one = repository.add_character(session, project_id=project.id, name="One")
@@ -598,6 +597,111 @@ async def test_recent_events_still_expose_speech_within_the_window(session):
         project_id=project.id, scene_id=scene.id, actor_character_id=outsider.id
     )
     assert SECRET_LINE in recorder.prompts[0], (
-        "in-window recent-events exposure was fixed; update this test and record "
-        "the change in docs/KNOWLEDGE_MODEL.md"
+        "within-room recent-events exposure changed; update this test and record "
+        "the change in docs/CONTEXT_ENGINE.md"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recent_events_hide_speech_from_another_scene(session):
+    """ADR 0004, rule 1: a scene is a trust boundary.
+
+    The measured leak was cross-scene: a character never present in scene 1
+    received its secret verbatim through the timeline-scoped block. The block
+    now renders only the active scene (plus legacy rows with no scene), so the
+    stranger's prompt must not contain the line.
+    """
+    project = repository.create_project(session, "Two Rooms")
+    one = repository.add_character(session, project_id=project.id, name="One")
+    stranger = repository.add_character(session, project_id=project.id, name="Stranger")
+    first = repository.create_scene(
+        session,
+        project_id=project.id,
+        timeline_id=project.active_timeline_id,
+        title="Cellar",
+        participant_ids=[one.id],
+    )
+    second = repository.create_scene(
+        session,
+        project_id=project.id,
+        timeline_id=project.active_timeline_id,
+        title="Attic",
+        participant_ids=[stranger.id],
+    )
+    session.commit()
+
+    from services.narrative.pipeline import NarrativePipeline
+
+    staging = json.loads((FIXTURES / "staging.json").read_text(encoding="utf-8"))
+    await NarrativePipeline(session, ScriptedProvider([staging])).stage(
+        project_id=project.id,
+        premise="One whispers alone in the cellar",
+        scene_id=first.id,
+        character_ids=[one.id],
+    )
+    NarrativePipeline(session, ScriptedProvider([])).approve_scene(
+        project_id=project.id, scene_id=first.id
+    )
+
+    await NarrativePipeline(
+        session,
+        ScriptedProvider(
+            [
+                {
+                    "selected_actor": one.id,
+                    "reason": "scripted",
+                    "prose": "One says it quietly.",
+                    "actions": [],
+                    "new_events": [
+                        {
+                            "event_type": "character_spoke",
+                            "character_id": one.id,
+                            "text": SECRET_LINE,
+                        }
+                    ],
+                    "state_changes": [],
+                    "open_commitments": [],
+                }
+            ]
+        ),
+    ).continue_scene(project_id=project.id, scene_id=first.id, actor_character_id=one.id)
+
+    await NarrativePipeline(session, ScriptedProvider([staging])).stage(
+        project_id=project.id,
+        premise="A stranger waits in the attic",
+        scene_id=second.id,
+        character_ids=[stranger.id],
+    )
+    NarrativePipeline(session, ScriptedProvider([])).approve_scene(
+        project_id=project.id, scene_id=second.id
+    )
+
+    class RecordingProvider(ScriptedProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.prompts = []
+
+        async def structured(self, messages, schema):
+            self.prompts.append(messages[-1].content)
+            return await super().structured(messages, schema)
+
+    recorder = RecordingProvider(
+        [
+            {
+                "selected_actor": stranger.id,
+                "reason": "scripted",
+                "prose": "The stranger waits.",
+                "actions": [],
+                "new_events": [],
+                "state_changes": [],
+                "open_commitments": [],
+            }
+        ]
+    )
+    await NarrativePipeline(session, recorder).continue_scene(
+        project_id=project.id, scene_id=second.id, actor_character_id=stranger.id
+    )
+    assert SECRET_LINE not in recorder.prompts[0], (
+        "a line spoken in the cellar reached a prompt assembled for the attic: "
+        "the scene boundary in _recent_events is not holding"
     )

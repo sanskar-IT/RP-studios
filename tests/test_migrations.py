@@ -76,9 +76,10 @@ def migrated_engine(migrated_url) -> Iterator[Engine]:
 
 def test_chain_is_linear_and_has_no_extra_heads():
     script = ScriptDirectory.from_config(alembic_config("sqlite://"))
-    assert script.get_heads() == ["0005_narrative_director"]
+    assert script.get_heads() == ["0006_event_scene_visibility"]
     assert script.get_base() == "0001_initial"
     assert [revision.revision for revision in script.walk_revisions()] == [
+        "0006_event_scene_visibility",
         "0005_narrative_director",
         "0004_context_reliability",
         "0003_production_constraints",

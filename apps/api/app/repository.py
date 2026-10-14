@@ -102,6 +102,7 @@ def append_event(
     actor_character_id: str | None = None,
     causation_id: str | None = None,
     idempotency_key: str | None = None,
+    scene_id: str | None = None,
 ) -> tuple[Event, TimelineNode, StateSnapshot]:
     if event_type not in KNOWN_EVENT_TYPES:
         raise ValueError(f"Unsupported narrative event type: {event_type}")
@@ -141,6 +142,7 @@ def append_event(
         source=source.value if isinstance(source, EventSource) else str(source),
         causation_id=causation_id,
         idempotency_key=idempotency_key,
+        scene_id=scene_id,
     )
     db.add(event)
     next_state = apply_event(previous, event_type, event_payload)
@@ -228,6 +230,7 @@ def start_scene_event(db: Session, scene: Scene) -> Event:
         event_type=SCENE_STARTED,
         payload={"scene_id": scene.id, "title": scene.title},
         source=EventSource.SYSTEM,
+        scene_id=scene.id,
     )
     set_scene_status(db, scene, SceneStatus.ACTIVE)
     return event
@@ -241,6 +244,7 @@ def end_scene_event(db: Session, scene: Scene) -> Event:
         event_type=SCENE_ENDED,
         payload={"scene_id": scene.id},
         source=EventSource.SYSTEM,
+        scene_id=scene.id,
     )
     set_scene_status(db, scene, SceneStatus.COMPLETED)
     return event
