@@ -32,7 +32,7 @@ virtual environment created from `.env.example`.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Python suite | `pytest` | 349 passed, 13 skipped |
+| Python suite | `pytest` | 350 passed, 13 skipped |
 | Migrations | `pytest tests/test_migrations.py` | 8 passed |
 | Engine evaluation | `python -m services.evaluation.harness --print` | 20/20 runs pass (5 scenarios at 10, 25, 50, 100 turns), 0 invalid events, 0 knowledge leaks, 0 branch leaks |
 | Director evaluation | `python -m services.evaluation.director --print` | 8/8 scenarios |
@@ -64,7 +64,7 @@ verified manually rather than automatically.
 | `creator_notes` and card text reach prompts without a trust boundary; over-long card descriptions are rejected rather than truncated | Open. Needs a trust-boundary design, not a patch |
 | Context budget can starve character state, and trims the knowledge guardrail it still describes as exhaustive | Open |
 | Performer output is never validated against the Director constraint envelope; exclusions are prompt-only | Open |
-| Structured output is prompt-injected and parsed with a bare `json.loads`; no `response_format`, no brace salvage, no retry, so a model that buries JSON in commentary fails the generation | Open. One markdown fence pair is stripped before parsing. A 4B model returned a complete and correct object inside a fence; that shape now parses. Ollama supports `response_format` natively and the adapter does not use it yet. See `docs/PROVIDERS.md` |
+| Structured output is prompt-injected and parsed with a bare `json.loads`; no `response_format`, no brace salvage, so a model that buries JSON in commentary fails the generation | Open. One markdown fence pair is stripped before parsing, and a failed Performer call is retried twice with its validation errors fed back. A 4B model returned a complete and correct object inside a fence; that shape now parses. Ollama supports `response_format` natively and the adapter does not use it yet. See `docs/PROVIDERS.md` |
 | `active_director_plan` has no timeline predicate after a fork | Open |
 | No CI workflow | Open |
 
@@ -754,21 +754,65 @@ See `docs/PERFORMER_ARCHITECTURE.md`.
 verify behaviour against scripted providers, not writing quality. Narrative quality
 is a separate question and needs a human reading the output.
 
-Run the opt-in live provider test only when a compatible endpoint is configured:
+Run the opt-in live provider tests only when a compatible endpoint is configured:
 
 ```text
 pytest -m smoke
 ```
 
-This includes `tests/test_local_smoke.py`, a repeatable dogfooding scenario that
-needs no paid credentials. It builds three characters with separate private
-knowledge, possesses one of them, and runs one turn per character against a live
-local model through the real pipeline. Both smoke tests self-skip when no provider
-is configured, so an unconfigured machine sees skips rather than failures.
+Two tests carry the `smoke` mark, and they check different things.
+`tests/test_provider_smoke.py` asserts connectivity only: one real completion
+against the configured endpoint, then close. `tests/test_local_smoke.py` is the
+repeatable dogfooding scenario: it builds three characters with separate
+private knowledge seeded through the event log, possesses one of them, stages
+one scene, and runs one turn per character through the real pipeline. Its
+assertions cover the engine (seeding, possession, prompt assembly, isolation);
+everything that depends on the model is reported, not asserted. Both self-skip
+when no provider is configured, so an unconfigured machine sees skips rather
+than failures.
 
-Set `NARRATIVE_PROVIDER`, `NARRATIVE_PROVIDER_BASE_URL`, and
-`NARRATIVE_PROVIDER_MODEL` in the environment to enable them. See
-`docs/PROVIDERS.md` for the Ollama block.
+Setup, with Ollama running and a model pulled (`ollama list` shows the exact
+id; the model is your choice, see [Local models with Ollama](#local-models-with-ollama-no-api-key-no-cost)):
+
+```bash
+export NARRATIVE_PROVIDER=ollama
+export NARRATIVE_PROVIDER_BASE_URL=http://localhost:11434/v1
+export NARRATIVE_PROVIDER_MODEL=<exact id from ollama list>
+export NARRATIVE_PROVIDER_API_KEY=
+export NARRATIVE_PROVIDER_CONTEXT_WINDOW=4096
+export NARRATIVE_PROVIDER_TIMEOUT_SECONDS=600
+```
+
+```powershell
+$env:NARRATIVE_PROVIDER = "ollama"
+$env:NARRATIVE_PROVIDER_BASE_URL = "http://localhost:11434/v1"
+$env:NARRATIVE_PROVIDER_MODEL = "<exact id from ollama list>"
+$env:NARRATIVE_PROVIDER_API_KEY = ""
+$env:NARRATIVE_PROVIDER_CONTEXT_WINDOW = "4096"
+$env:NARRATIVE_PROVIDER_TIMEOUT_SECONDS = "600"
+```
+
+`NARRATIVE_PROVIDER_CONTEXT_WINDOW` must match the server's `num_ctx`
+(Ollama defaults to 4096); the studio's 8192 default would let the assembler
+build prompts the server rejects. The timeout default of 120 seconds is short
+for CPU-bound inference; there is no retry at the HTTP layer, so a timeout
+costs the whole turn. See `docs/PROVIDERS.md` for the larger-context recipe
+and the known per-model failure shapes.
+
+Read the scenario report, not just the exit code. `turns completed: n of 3`
+tells you how many turns committed; a run where no turn completed fails loudly
+because it verified nothing. `private facts absent from other characters'
+prompts` is the isolation assertion. `private facts echoed in prose` and the
+per-turn errors are findings: a rejected turn means the engine refused a bad
+claim, which is the engine working, not the engine broken.
+
+Two behaviours to expect on a small local model. A turn gets up to three
+Performer attempts: the first call plus two retries with the validation errors
+fed back, each attempt its own Generation row, the whole response revalidated
+every time. And repeated runs vary: structured calls default to temperature
+0.2, so acceptance moves run to run. For comparable measurements, freeze the
+model, the six variables above, and the engine revision, and keep them frozen
+for the whole batch.
 
 **A green smoke run is a wiring check, not a quality check.** It confirms the
 endpoint answers and that the engine commits or refuses cleanly. It does not
@@ -882,8 +926,37 @@ commentary-embedded JSON, empty replies, and truncations still fail as before,
 and two scenario tests that pinned the old rejection were rewritten to pin the
 new contract instead. The same run then staged cleanly, committed one of three
 turns, correctly rejected the other two on malformed `character_moved` claims,
-and held knowledge isolation throughout. `response_format`, brace salvage, and
-retry remain open (see `docs/PROVIDERS.md`).
+and held knowledge isolation throughout. `response_format` and brace salvage remain
+open (see `docs/PROVIDERS.md`).
+
+### Twelve local runs classified the model failures, then fixed the prompt
+
+The multi-character scenario was run twelve times against the on-machine 4B
+model with settings frozen, capturing raw replies, parsed payloads, and
+validation errors per call. Turn acceptance went 4 of 12, then 6 of 9 after the
+prompt fix, then 9 of 9, 5 of 6, and 3 of 3 once retries were evaluated.
+Staging succeeded 12 of 12. Isolation held in all 12 runs. Three failure
+classes appeared, and each got a different response. Missing `location_id` on
+`character_moved` was a prompt-validator mismatch: the schema declared the
+property but never said any type requires it, so the schema now states each
+type's required fields and the validator is untouched. Prose returned instead
+of JSON and invented event types are model variance: recorded as model
+limitations, recovered by retry where possible. Truncated mid-object replies
+are capacity failures no retry can fix: all three attempts truncated, so the
+turn fails loudly rather than committing a fragment.
+
+### Failed Performer calls are retried twice with their errors fed back
+
+A turn gets up to three Performer attempts: the first call plus two retries.
+Each retry appends the previous validation errors to the prompt and the whole
+new response is revalidated; a repaired fragment is never merged into a
+rejected payload. Each attempt leaves its own Generation row, rejected or
+failed, so retries are auditable. The retry covers parse failures, claim
+rejections, and performer-contract violations; anything else propagates
+immediately. Recovery tests that pinned fail-fast now pin three-attempt
+exhaustion instead. Measured live: one rejected turn recovered to completed on
+retry; one turn failed all three attempts on truncated replies and surfaced the
+last error unchanged.
 
 ### The recent-events block is scoped to the active scene
 
@@ -1162,14 +1235,19 @@ default.
 ### A local model returns a failed generation
 
 Almost always the structured-output path, not the connection. The adapter asks
-for JSON through the prompt rather than through `response_format`, so a model
-that wraps its reply in a markdown fence, or comments before the JSON, produces
-something `json.loads` rejects. The generation is recorded as failed, nothing is
-committed, and there is no automatic retry.
+for JSON through the prompt rather than through `response_format`. One fence
+pair is stripped, but a model that comments before the JSON, returns prose
+instead of JSON, or truncates mid-object produces something `json.loads`
+rejects. A failed Performer call is retried twice with its errors fed back;
+check the Generation rows to see whether all three attempts failed the same
+way. Nothing is committed from a failed turn either way.
 
 Read `generations.error` before changing anything. If it names the provider
 request rather than the JSON, check the base URL for the `/v1` suffix and confirm
-the model id matches `ollama list`. If it names structured JSON, the model is the
+the model id matches `ollama list`. If every attempt truncated mid-object, the
+prompt is likely near the server's `num_ctx`: lower
+`NARRATIVE_PROVIDER_CONTEXT_WINDOW` or raise the server's. If it names
+structured JSON or rejected claims, the model is the
 problem: lower the temperature expectation, try a model with stronger JSON
 instruction-following, or expect to hit this repeatedly on models below about 8B.
 
