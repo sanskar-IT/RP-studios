@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Supersedes nothing. The behaviour it replaces is the in-window
+Implemented. Supersedes nothing. The behaviour it replaces is the in-window
 exposure recorded as a known limitation in `README.md` and
 `docs/CONTEXT_ENGINE.md` §2.3.2.
 
@@ -90,3 +90,20 @@ Finally, `knowledge_leaks` in the evaluation harness could not see any of this.
 It inspects facts in `view.withheld`, and invented content has no fact record, so
 the metric reported 0 while a stranger read the secret. A presence invariant
 replaces it as the signal for this class.
+
+## Implementation notes
+
+Scene attribution is a nullable `scene_id` column on `events` (migration
+`0006_event_scene_visibility`), stamped by `repository.append_event` at every
+scene-bound commit site in the pipeline. Operator- and timeline-scoped commits
+(canon divergence, state correction, commitment lifecycle) carry no scene and
+render as legacy. Rows committed before the migration are NULL and keep
+rendering everywhere: no backfill is attempted, because the scene of a
+historical event cannot be derived reliably and silently redacting history
+would be worse than showing it.
+
+The harness runs single-scene scenarios, so its `no_scene_leak` scorer passes
+vacuously on today's fixtures. The primary signal is the deterministic
+cross-scene test in `tests/test_knowledge_isolation.py`, which replays the
+measured case from this ADR (a stranger reading the scene-1 secret) and fails
+on the pre-change code.

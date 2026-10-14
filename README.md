@@ -32,7 +32,7 @@ virtual environment created from `.env.example`.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Python suite | `pytest` | 344 passed, 13 skipped |
+| Python suite | `pytest` | 349 passed, 13 skipped |
 | Migrations | `pytest tests/test_migrations.py` | 8 passed |
 | Engine evaluation | `python -m services.evaluation.harness --print` | 20/20 runs pass (5 scenarios at 10, 25, 50, 100 turns), 0 invalid events, 0 knowledge leaks, 0 branch leaks |
 | Director evaluation | `python -m services.evaluation.director --print` | 8/8 scenarios |
@@ -58,13 +58,13 @@ verified manually rather than automatically.
 
 | Limitation | Status |
 | --- | --- |
-| `_recent_events` renders speech to every character within the context window, and `_overhear` grants no suspicion for a paraphrase | **Open.** `test_recent_events_still_expose_speech_within_the_window` asserts the leak still exists, so the gap stays visible until it is closed deliberately |
+| `_recent_events` is scoped to the active scene per ADR 0004, but `_overhear` grants no suspicion for a paraphrase | **Partially closed.** `test_recent_events_hide_speech_from_another_scene` replays the measured cross-scene leak; within-room speech stays visible by design. The paraphrase accounting gap is still open |
 | No authentication; Compose binds all interfaces and publishes PostgreSQL on `5432` | Open. Bind to loopback before any shared deployment — see [Security Before Publishing](#security-before-publishing) |
 | Unbounded request body size; uploads spool to disk before the 413 | Open |
 | `creator_notes` and card text reach prompts without a trust boundary; over-long card descriptions are rejected rather than truncated | Open. Needs a trust-boundary design, not a patch |
 | Context budget can starve character state, and trims the knowledge guardrail it still describes as exhaustive | Open |
 | Performer output is never validated against the Director constraint envelope; exclusions are prompt-only | Open |
-| Structured output is prompt-injected and parsed with a bare `json.loads`; no `response_format`, no fence stripping, no retry, so a model that wraps JSON in a markdown fence fails the generation | Open. A 4B model returned a complete and correct object inside a fence. Ollama supports `response_format` natively and the adapter does not use it yet. See `docs/PROVIDERS.md` |
+| Structured output is prompt-injected and parsed with a bare `json.loads`; no `response_format`, no brace salvage, no retry, so a model that buries JSON in commentary fails the generation | Open. One markdown fence pair is stripped before parsing. A 4B model returned a complete and correct object inside a fence; that shape now parses. Ollama supports `response_format` natively and the adapter does not use it yet. See `docs/PROVIDERS.md` |
 | `active_director_plan` has no timeline predicate after a fork | Open |
 | No CI workflow | Open |
 
@@ -512,11 +512,10 @@ covers the larger-context recipe and the structured-output limitation in full.
 One caveat worth knowing before your first turn. The adapter used to send two
 leading system messages on every structured call, which Ollama rejects with HTTP
 500; that is fixed. What remains is that this adapter asks for JSON through the
-prompt rather than through `response_format`, so a model that wraps its reply in
-a markdown fence fails the generation. A 4B model returned a complete, correct
-staging object inside a ```` ```json ```` fence while being told not to, so this
-is the most likely thing to stop your first turn. `docs/PROVIDERS.md` records the
-reproduction and what it looks like.
+prompt rather than through `response_format`. A single markdown fence pair is
+stripped before parsing, so a fenced but valid object succeeds; JSON buried in
+commentary, an empty reply, or a truncated object still fails the generation.
+`docs/PROVIDERS.md` records the reproduction and what each shape does.
 
 ## Using the Studio
 
@@ -871,6 +870,33 @@ returned an empty completion` on a null, empty, or blank content, and the error
 names the fix: raise `max_tokens` or disable thinking. The old test asserted
 the stringification; it now asserts the error across all three shapes.
 `docs/PROVIDERS.md` records the open `reasoning` field work this does not fix.
+
+### Fenced structured replies now parse
+
+The first live run against a local 4B model failed at staging: the model
+returned a complete, correct staging object wrapped in ```` ```json ```` fences
+while told not to, and the adapter handed it to `json.loads` verbatim.
+`structured()` now strips one fence pair and surrounding whitespace before
+parsing. A correct object in fences behaves exactly like the same object bare;
+commentary-embedded JSON, empty replies, and truncations still fail as before,
+and two scenario tests that pinned the old rejection were rewritten to pin the
+new contract instead. The same run then staged cleanly, committed one of three
+turns, correctly rejected the other two on malformed `character_moved` claims,
+and held knowledge isolation throughout. `response_format`, brace salvage, and
+retry remain open (see `docs/PROVIDERS.md`).
+
+### The recent-events block is scoped to the active scene
+
+ADR 0004 is now implemented. Events carry the scene that produced them
+(migration `0006_event_scene_visibility`), and `_recent_events` renders only
+the active scene plus legacy rows from before attribution existed, which keep
+showing everywhere rather than being silently redacted. Within the scene, a
+speech line is visible to whoever was present or spoke it; beliefs are never
+consulted. `_overhear` is unchanged, including the paraphrase gap, which stays
+an open limitation above. The harness gains a `no_scene_leak` scorer, but its
+scenarios run single scenes, so the deterministic cross-scene test in
+`tests/test_knowledge_isolation.py` is the primary signal: it replays the
+measured stranger-reading-the-secret case and fails on the pre-change code.
 
 ### Review fixes to the P0 work
 

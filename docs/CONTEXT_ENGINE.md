@@ -334,25 +334,31 @@ which is the accurate statement: the engine cannot derive a goal for a character
 from the fact that they said something. `last_action_type` retains the type, so the
 event is still discoverable.
 
-### 2.3.2 In-window exposure is still open
+### 2.3.2 Cross-scene exposure is closed; within-room speech is accurate
 
-The permanent leak above is closed. The in-window one is not.
+The permanent leak above is closed. The cross-scene in-window leak is now
+closed too, by ADR 0004.
 
-`_recent_events` renders the text of the last few events to every character in the
-scene regardless of who was present, and `_overhear` records no suspicion when the
-claim is a paraphrase rather than the verbatim fact. A bystander prompted later in
-the same scene therefore still sees the line, and their knowledge contains nothing
-explaining it.
+`_recent_events` renders only the active scene: events carry the scene that
+produced them (migration `0006_event_scene_visibility`), and a line spoken in
+one scene no longer appears in another scene's prompts. Within the scene, a
+speech line is visible to a viewer who was present or who spoke it; anyone
+else gets a marker, and beliefs are never consulted for visibility. Showing
+speech to a character who was in the room is accurate, not a leak. The presence
+half is still vacuous in practice — `ActorBrief.present` is `not dead`, so
+every participant counts as present — until per-turn physical presence is
+modelled.
 
-The principled fix is to make `_overhear` fail *open* toward suspicion. That is a
-design change with its own cost: suspicion growth is already unbounded, so
-defaulting to suspicion increases how fast that budget is consumed. It is deferred
-rather than half-applied.
+`_overhear` still records no suspicion when the claim is a paraphrase rather
+than the verbatim fact. The principled fix is to make `_overhear` fail *open*
+toward suspicion. That is a design change with its own cost: suspicion growth
+is already unbounded, so defaulting to suspicion increases how fast that budget
+is consumed. It is deferred rather than half-applied.
 
-`test_recent_events_still_expose_speech_within_the_window`
-(`tests/test_knowledge_isolation.py`) asserts the leak is *present*, so the gap
-stays visible and the test fails loudly if someone closes it without recording the
-change.
+`test_recent_events_show_speech_to_characters_present_in_the_scene`
+(`tests/test_knowledge_isolation.py`) pins the within-room behaviour, and
+`test_recent_events_hide_speech_from_another_scene` replays the measured
+cross-scene leak and fails on the pre-change code.
 
 ## 2.4 Validation and contradictions
 
