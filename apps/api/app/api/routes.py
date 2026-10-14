@@ -52,7 +52,12 @@ from services.importers.character_cards import (
 )
 from services.lorebook.evaluator import LoreCandidate, evaluate_lore
 from services.narrative.pipeline import NarrativePipeline
-from services.providers import HeuristicProvider, LLMProvider, OpenAICompatibleProvider
+from services.providers import (
+    HeuristicProvider,
+    LLMProvider,
+    OpenAICompatibleProvider,
+    is_configured_provider,
+)
 from services.providers.capabilities import (
     HEURISTIC_CAPABILITIES,
     capabilities_from_mapping,
@@ -65,13 +70,14 @@ def build_pipeline(db) -> NarrativePipeline:
     settings = get_settings()
     provider: LLMProvider
     capabilities: dict[str, Any]
-    if settings.provider_name.casefold() in {"openai", "openai_compatible", "local", "generic"}:
+    if is_configured_provider(settings.provider_name):
         if not settings.provider_base_url or not settings.provider_model:
             raise HTTPException(status_code=503, detail="The configured provider is missing base URL or model")
         provider = OpenAICompatibleProvider(
             settings.provider_base_url,
             settings.provider_model,
             settings.provider_api_key or None,
+            timeout=settings.provider_timeout_seconds,
         )
         capabilities = capabilities_from_mapping(
             {
@@ -97,8 +103,7 @@ def build_pipeline(db) -> NarrativePipeline:
         # Structured plan refinement only runs for a real configured provider;
         # the heuristic provider has nothing to refine with, so the deterministic
         # plan is used directly.
-        director_refinement=settings.provider_name.casefold()
-        in {"openai", "openai_compatible", "local", "generic"},
+        director_refinement=is_configured_provider(settings.provider_name),
     )
 
 
@@ -702,7 +707,7 @@ def correct_state(
 @router.get("/providers/capabilities")
 def provider_capabilities() -> dict[str, Any]:
     settings = get_settings()
-    if settings.provider_name.casefold() in {"openai", "openai_compatible", "local", "generic"}:
+    if is_configured_provider(settings.provider_name):
         return capabilities_from_mapping(
             {
                 "model": settings.provider_model,

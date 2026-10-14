@@ -20,12 +20,17 @@ async def test_configured_openai_compatible_endpoint():
         base_url,
         model,
         os.getenv("NARRATIVE_PROVIDER_API_KEY") or None,
+        timeout=float(os.getenv("NARRATIVE_PROVIDER_TIMEOUT_SECONDS", "").strip() or 120.0),
     )
     try:
         response = await provider.generate(
             [ProviderMessage(role="user", content="Return the single word ready.")],
             temperature=0,
-            max_tokens=8,
+            # Reasoning models emit a thinking block before the answer and the
+            # adapter reads only the answer. At 8 tokens the thinking block
+            # consumed the entire budget, the response came back empty, and the
+            # endpoint looked broken when it was answering perfectly well.
+            max_tokens=512,
         )
     finally:
         await provider.close()

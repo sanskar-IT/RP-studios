@@ -3,8 +3,31 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from apps.api.app.config import Settings
 from apps.api.app.dependencies import db_session
 from apps.api.app.main import app
+from services.providers import HeuristicProvider, OpenAICompatibleProvider
+
+_BASE_SETTINGS = {
+    "provider_name": "ollama",
+    "provider_base_url": "http://localhost:11434/v1",
+    "provider_model": "local-model",
+    "provider_api_key": "",
+    "provider_context_window": 4096,
+    "provider_max_output_tokens": 1024,
+    "provider_features": "structured_output",
+    "provider_timeout_seconds": 30.0,
+}
+
+
+def _use_settings(monkeypatch, **overrides) -> None:
+    """Point the routes at a real ``Settings``, overridden field by field.
+
+    A hand-rolled stand-in would miss the derived properties the pipeline reads,
+    which is exactly the sort of thing a fake quietly fails to exercise.
+    """
+    settings = Settings(**{**_BASE_SETTINGS, **overrides})
+    monkeypatch.setattr("apps.api.app.api.routes.get_settings", lambda **kwargs: settings)
 
 
 @pytest.fixture
@@ -214,3 +237,55 @@ def test_provider_capabilities_route_makes_the_unconfigured_adapter_detectable()
     assert body["adapter"] in {"heuristic", "openai_compatible"}
     if body["adapter"] == "heuristic":
         assert body["supports_structured_output"] in {True, False}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["ollama", "local", "openai_compatible", "openai-compatible", "openai", "generic", "OLLAMA"],
+)
+def test_a_recognised_provider_name_builds_the_compatible_adapter(
+    monkeypatch, name: str
+) -> None:
+    """Every spelling a person would actually type has to select the adapter.
+
+    An unrecognised name falls back to the heuristic provider without raising, so
+    ``NARRATIVE_PROVIDER=ollama`` used to produce a studio that looked healthy,
+    reported ``adapter: heuristic``, and never contacted a model. There was no
+    error to notice, only a capability report to read carefully.
+    """
+    from apps.api.app.api.routes import build_pipeline
+
+    _use_settings(monkeypatch, provider_name=name)
+    pipeline = build_pipeline(None)
+    assert isinstance(pipeline.provider, OpenAICompatibleProvider)
+    assert pipeline.provider.model == "local-model"
+    assert pipeline.provider.timeout == 30.0
+    assert pipeline.capabilities.model == "local-model"
+    assert pipeline.capabilities.context_window == 4096
+
+
+@pytest.mark.parametrize("name", ["heuristic", "", "ollam", "openai_compatable"])
+def test_an_unrecognised_provider_name_still_falls_back_without_raising(
+    monkeypatch, name: str
+) -> None:
+    from apps.api.app.api.routes import build_pipeline
+
+    _use_settings(monkeypatch, provider_name=name)
+    pipeline = build_pipeline(None)
+    assert isinstance(pipeline.provider, HeuristicProvider)
+
+
+def test_a_configured_provider_without_a_base_url_is_refused_loudly(monkeypatch) -> None:
+    """A configured provider that cannot be built is an error, not a fallback.
+
+    Falling back here would hide the misconfiguration behind a working-looking
+    studio, which is the exact failure the provider-name set exists to prevent.
+    """
+    from fastapi import HTTPException
+
+    from apps.api.app.api.routes import build_pipeline
+
+    _use_settings(monkeypatch, provider_base_url="")
+    with pytest.raises(HTTPException) as caught:
+        build_pipeline(None)
+    assert caught.value.status_code == 503

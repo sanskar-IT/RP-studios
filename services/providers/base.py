@@ -35,6 +35,28 @@ class ProviderError(RuntimeError):
     pass
 
 
+# Names that select a real network provider rather than the offline default.
+# This set is the only thing standing between a plausible configuration typo and
+# a studio that silently runs on the heuristic provider, so it carries the vendor
+# spellings people actually type as well as the generic ones. Anything outside
+# this set falls back to ``HeuristicProvider`` rather than erroring, which means
+# a missing name fails quietly; keeping the list complete is the mitigation.
+CONFIGURED_PROVIDER_NAMES = frozenset(
+    {
+        "openai",
+        "openai_compatible",
+        "openai-compatible",
+        "local",
+        "ollama",
+        "generic",
+    }
+)
+
+
+def is_configured_provider(name: str) -> bool:
+    return name.strip().casefold() in CONFIGURED_PROVIDER_NAMES
+
+
 class HeuristicProvider:
     async def generate(self, messages: list[ProviderMessage], *, temperature: float = 0.7, max_tokens: int | None = None) -> str:
         prompt = messages[-1].content if messages else ""
