@@ -1,0 +1,4 @@
+# Make line-ending handling explicit rather than relying on each
+# machine's core.autocrlf. Text files are normalized to LF in the index;
+# checkouts use the platform convention.
+* text=auto
