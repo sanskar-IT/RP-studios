@@ -150,6 +150,19 @@ GENERATION_SCHEMA: dict[str, Any] = {
         },
         "proposed_events": {
             "type": "array",
+            "description": (
+                "Proposed timeline events. Proposals only; the engine decides. "
+                "Each type needs its fields, and incomplete events are rejected "
+                "whole: character_moved needs character_id and location_id (use "
+                "the SCENE Location value); character_spoke and "
+                "character_performed_action need character_id and text; "
+                "relationship_changed needs source_character_id and "
+                "target_character_id; knowledge_acquired, knowledge_suspected "
+                "and knowledge_refuted need character_id and fact; "
+                "item_acquired, item_removed, injury_added and injury_removed "
+                "need character_id and the item or injury; location_changed "
+                "needs location_id. Emit only complete events."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -278,6 +291,11 @@ def _invalidate_on_interruption(plan: Any, reason: str) -> list[str]:
 
 # Recent history is the tail of the timeline, never the whole transcript.
 RECENT_EVENT_LIMIT = 8
+# Performer attempts per turn: the first call plus this many retries. A retry
+# re-issues the whole Performer call with the validation errors fed back, and
+# the whole response is revalidated; a repaired fragment is never merged into
+# a rejected payload. Attempts beyond this surface the last error unchanged.
+MAX_PERFORMER_ATTEMPTS = 3
 HISTORY_DIGEST_AFTER = 24
 DEFAULT_MEMORY_LIMIT = 10
 LORE_ACTIVATION_CAP = 24
@@ -830,100 +848,127 @@ class NarrativePipeline:
         ]
         trace.lore_debug = lore_debug.to_dict()
         trace.active_commitments = list(planner_context.get("commitments", []))
-        generation = repository.add_generation(
-            self.db,
-            project_id=project_id,
-            scene_id=scene.id,
-            timeline_id=scene.timeline_id,
-            status=GenerationStatus.RUNNING.value,
-            input_text=user_input,
-            provider_name=type(self.provider).__name__,
-            model_name=getattr(self.provider, "model", "heuristic"),
-            lore_debug=lore_debug.to_dict(),
-            context_debug=assembly.to_dict(),
-        )
-        trace.generation_id = generation.id
-        try:
-            with timer.measure("llm_request"):
-                structured = await self._structured(
-                    [
-                        ProviderMessage(role="system", content=SYSTEM_RULES),
-                        ProviderMessage(role="user", content=prompt),
-                    ],
-                    GENERATION_SCHEMA,
+        # Bounded retry around the Performer call only. The Director, context
+        # assembly, and memory retrieval run once; only the generation,
+        # validation, and rejection recording repeat. Each attempt gets its own
+        # Generation row, so retries are auditable rather than silent, and a
+        # failed attempt commits nothing but its own record. The retry feeds
+        # the previous errors back verbatim with the schema requirements, then
+        # revalidates the whole new response.
+        revision_notes: list[str] = []
+        for attempt in range(1, MAX_PERFORMER_ATTEMPTS + 1):
+            generation = repository.add_generation(
+                self.db,
+                project_id=project_id,
+                scene_id=scene.id,
+                timeline_id=scene.timeline_id,
+                status=GenerationStatus.RUNNING.value,
+                input_text=user_input,
+                provider_name=type(self.provider).__name__,
+                model_name=getattr(self.provider, "model", "heuristic"),
+                lore_debug=lore_debug.to_dict(),
+                context_debug=assembly.to_dict(),
+            )
+            trace.generation_id = generation.id
+            attempt_prompt = prompt
+            if revision_notes:
+                attempt_prompt = (
+                    prompt
+                    + "\n\nThe previous reply was rejected. Fix every issue below and "
+                    + "return a complete corrected response. Return only the corrected "
+                    + "JSON:\n- "
+                    + "\n- ".join(revision_notes)
                 )
-            with timer.measure("performer_result"):
-                # The Performer reads its own structured result, so a claim that
-                # names a character who is not in the scene is dropped here rather
-                # than reaching validation. Validation is a safety net, not the
-                # Performer's first line of defence about its own cast.
-                performer_result = read_performer_result(structured, request=performer_request)
-                performer_violations = self._performer_violations(
-                    performer_result, request=performer_request, state=state
-                )
-                if performer_violations:
-                    raise ValueError(
-                        "Performer proposal violated the scene contract: "
-                        + "; ".join(violation.summary for violation in performer_violations)
+            try:
+                with timer.measure("llm_request"):
+                    structured = await self._structured(
+                        [
+                            ProviderMessage(role="system", content=SYSTEM_RULES),
+                            ProviderMessage(role="user", content=attempt_prompt),
+                        ],
+                        GENERATION_SCHEMA,
                     )
-            with timer.measure("claim_extraction"):
-                self._validate_generation_shape(structured, performer_result=performer_result)
-                provider_actor = str(structured.get("selected_actor") or "")
-                event_actor_id = actor_id or ""
-                if not actor_character_id and provider_actor in participant_ids:
-                    event_actor_id = provider_actor
-                # Fold the Performer's structured result into the canonical
-                # generation shape, then extract and validate through the existing
-                # pipeline unchanged. The Performer gets a richer output structure
-                # without forking the validation path.
-                claims = extract_claims(
-                    performer_result.to_generation_shape(
+                with timer.measure("performer_result"):
+                    # The Performer reads its own structured result, so a claim that
+                    # names a character who is not in the scene is dropped here rather
+                    # than reaching validation. Validation is a safety net, not the
+                    # Performer's first line of defence about its own cast.
+                    performer_result = read_performer_result(structured, request=performer_request)
+                    performer_violations = self._performer_violations(
+                        performer_result, request=performer_request, state=state
+                    )
+                    if performer_violations:
+                        raise ValueError(
+                            "Performer proposal violated the scene contract: "
+                            + "; ".join(violation.summary for violation in performer_violations)
+                        )
+                with timer.measure("claim_extraction"):
+                    self._validate_generation_shape(structured, performer_result=performer_result)
+                    provider_actor = str(structured.get("selected_actor") or "")
+                    event_actor_id = actor_id or ""
+                    if not actor_character_id and provider_actor in participant_ids:
+                        event_actor_id = provider_actor
+                    # Fold the Performer's structured result into the canonical
+                    # generation shape, then extract and validate through the existing
+                    # pipeline unchanged. The Performer gets a richer output structure
+                    # without forking the validation path.
+                    claims = extract_claims(
+                        performer_result.to_generation_shape(
+                            actor_id=event_actor_id,
+                            participant_ids=participant_ids,
+                        ),
                         actor_id=event_actor_id,
                         participant_ids=participant_ids,
-                    ),
-                    actor_id=event_actor_id,
-                    participant_ids=participant_ids,
-                )
-            with timer.measure("claim_validation"):
-                validation = validate_claims(claims, state, detector=detector)
-                # The prose is presentation, not truth, so a prose problem is
-                # recorded as a warning and never blocks the turn. But it is
-                # still checked: prose that states what the actor never learned
-                # is how a leak hides in plain sight.
-                for warning in detector.for_prose(claims.prose):
-                    validation.warnings.append(warning)
-                if validation.status == VALID and validation.warnings:
-                    validation.status = ACCEPTED_WITH_WARNINGS
-        except Exception as exc:
-            if generation.status == GenerationStatus.RUNNING.value:
-                generation.status = GenerationStatus.FAILED.value
-                generation.error = str(exc)[:500]
-            generation.trace = self._trace_payload(trace, timer, None, None, None)
-            self.db.add(generation)
-            if commit_on_success:
-                self.db.commit()
-            else:
-                self.db.flush()
-            raise
-        if not validation.valid:
-            # Nothing is committed. The generation is recorded as rejected with
-            # the reasons and the recovery options, and the turn can be retried,
-            # regenerated, edited, or discarded without touching narrative state.
-            generation.status = GenerationStatus.REJECTED.value
-            generation.output_text = claims.prose
-            generation.validation = validation.to_dict()
-            generation.error = "; ".join(validation.errors)[:500]
-            trace.generated_events = claim_summary(claims)
-            trace.contradictions = [warning.to_dict() for warning in validation.warnings]
-            generation.trace = self._trace_payload(trace, timer, claims, validation, None)
-            self.db.add(generation)
-            if commit_on_success:
-                self.db.commit()
-            else:
-                self.db.flush()
-            raise ValueError(
-                "Generated claims were rejected before commit: " + "; ".join(validation.errors)
-            )
+                    )
+                with timer.measure("claim_validation"):
+                    validation = validate_claims(claims, state, detector=detector)
+                    # The prose is presentation, not truth, so a prose problem is
+                    # recorded as a warning and never blocks the turn. But it is
+                    # still checked: prose that states what the actor never learned
+                    # is how a leak hides in plain sight.
+                    for warning in detector.for_prose(claims.prose):
+                        validation.warnings.append(warning)
+                    if validation.status == VALID and validation.warnings:
+                        validation.status = ACCEPTED_WITH_WARNINGS
+            except Exception as exc:
+                if generation.status == GenerationStatus.RUNNING.value:
+                    generation.status = GenerationStatus.FAILED.value
+                    generation.error = str(exc)[:500]
+                generation.trace = self._trace_payload(trace, timer, None, None, None)
+                self.db.add(generation)
+                if commit_on_success:
+                    self.db.commit()
+                else:
+                    self.db.flush()
+                if not isinstance(exc, (ProviderError, ValueError)):
+                    raise
+                revision_notes.append(str(exc)[:500])
+                if attempt >= MAX_PERFORMER_ATTEMPTS:
+                    raise
+                continue
+            if not validation.valid:
+                # Nothing is committed. The generation is recorded as rejected with
+                # the reasons and the recovery options, and the turn can be retried,
+                # regenerated, edited, or discarded without touching narrative state.
+                generation.status = GenerationStatus.REJECTED.value
+                generation.output_text = claims.prose
+                generation.validation = validation.to_dict()
+                generation.error = "; ".join(validation.errors)[:500]
+                trace.generated_events = claim_summary(claims)
+                trace.contradictions = [warning.to_dict() for warning in validation.warnings]
+                generation.trace = self._trace_payload(trace, timer, claims, validation, None)
+                self.db.add(generation)
+                if commit_on_success:
+                    self.db.commit()
+                else:
+                    self.db.flush()
+                revision_notes.append("; ".join(validation.errors)[:500])
+                if attempt >= MAX_PERFORMER_ATTEMPTS:
+                    raise ValueError(
+                        "Generated claims were rejected before commit: " + "; ".join(validation.errors)
+                    )
+                continue
+            break
         # A required consequence the Performer did not realise is a demand that
         # failed, and the turn must not report success while quietly dropping it.
         # The user would be told the plan is progressing when it is not, which is

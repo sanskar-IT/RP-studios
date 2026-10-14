@@ -256,6 +256,7 @@ async def test_the_performer_may_not_invent_a_decision_for_a_possessed_character
                     ],
                 )
             ]
+            * 3
         ),
     )
     with pytest.raises(ValueError, match="user-controlled"):
@@ -324,6 +325,7 @@ async def test_the_performer_may_not_speak_for_a_possessed_character(session, ca
                     dialogue=[{"character_id": detective.id, "line": "I know everything."}],
                 )
             ]
+            * 3
         ),
     )
     with pytest.raises(ValueError, match="spoke for"):
@@ -383,6 +385,7 @@ async def test_a_claim_naming_a_stranger_is_rejected_rather_than_silently_droppe
                     ],
                 )
             ]
+            * 3
         ),
     )
     with pytest.raises(ValueError):
@@ -486,6 +489,7 @@ async def test_a_major_decision_relabelled_as_a_reaction_is_still_refused(sessio
                     ],
                 )
             ]
+            * 3
         ),
     )
     # A contract violation is the refusal mechanism: the proposal is discarded

@@ -175,6 +175,24 @@ async def test_invalid_claims_reject_before_commit(session):
                     "state_changes": [],
                     "open_commitments": [],
                 },
+                {
+                    "selected_actor": character.id,
+                    "reason": "scripted",
+                    "prose": "The witness claims an impossible thing.",
+                    "actions": [],
+                    "new_events": [{"event_type": "teleport_to_mars"}],
+                    "state_changes": [],
+                    "open_commitments": [],
+                },
+                {
+                    "selected_actor": character.id,
+                    "reason": "scripted",
+                    "prose": "The witness claims an impossible thing.",
+                    "actions": [],
+                    "new_events": [{"event_type": "teleport_to_mars"}],
+                    "state_changes": [],
+                    "open_commitments": [],
+                },
             ]
         ),
     )
@@ -192,7 +210,13 @@ async def test_invalid_claims_reject_before_commit(session):
 
     from services.core.models import Generation
 
-    generation = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert generation.status == "rejected"
-    assert generation.validation["status"] == "rejected"
-    assert generation.trace["validation"]["status"] == "rejected"
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["rejected"] * 3
+    assert generations[0].validation["status"] == "rejected"
+    assert generations[0].trace["validation"]["status"] == "rejected"

@@ -14,8 +14,9 @@ from services.providers.base import HeuristicProvider, ProviderError, ScriptedPr
 FIXTURES = Path(__file__).parent / "fixtures" / "provider"
 
 
-def provider(name: str) -> ScriptedProvider:
-    return ScriptedProvider([json.loads((FIXTURES / name).read_text(encoding="utf-8"))])
+def provider(name: str, count: int = 1) -> ScriptedProvider:
+    response = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    return ScriptedProvider([response] * count)
 
 
 def active_scene(session):
@@ -43,11 +44,17 @@ async def test_invalid_provider_output_fails_generation_without_committing_event
         character_ids=[character.id],
     )
     pipeline.approve_scene(project_id=project.id, scene_id=scene.id, staging_revision=staged.structured_output["staging_revision"])
-    pipeline.provider = provider("invalid_output.json")
+    pipeline.provider = provider("invalid_output.json", count=3)
     with pytest.raises(ValueError):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
-    generation = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert generation.status == "failed"
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["failed"] * 3
     assert not any(
         event.event_type in {"ai_action", "user_action"}
         for event in repository.list_events(session, project.active_timeline_id)
@@ -65,9 +72,17 @@ async def test_malformed_event_is_rejected_before_persistence(session):
         character_ids=[character.id],
     )
     pipeline.approve_scene(project_id=project.id, scene_id=scene.id, staging_revision=staged.structured_output["staging_revision"])
-    pipeline.provider = provider("malformed_event.json")
+    pipeline.provider = provider("malformed_event.json", count=3)
     with pytest.raises(ValueError):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["rejected"] * 3
     assert not any(
         event.event_type == "character_moved"
         for event in repository.list_events(session, project.active_timeline_id)

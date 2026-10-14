@@ -41,28 +41,31 @@ async def test_unknown_character_reference_rejects_without_committing(session):
     pipeline.approve_scene(
         project_id=project.id, scene_id=scene.id, staging_revision=staged.structured_output["staging_revision"]
     )
-    pipeline.provider = ScriptedProvider(
-        [
-            {
-                "selected_actor": character.id,
-                "reason": "scripted",
-                "prose": "A stranger appears.",
-                "actions": [],
-                "new_events": [
-                    {"event_type": "character_moved", "character_id": "ghost", "location_id": "hall"}
-                ],
-                "state_changes": [],
-                "open_commitments": [],
-            }
-        ]
-    )
+    ghost_move = {
+        "selected_actor": character.id,
+        "reason": "scripted",
+        "prose": "A stranger appears.",
+        "actions": [],
+        "new_events": [
+            {"event_type": "character_moved", "character_id": "ghost", "location_id": "hall"}
+        ],
+        "state_changes": [],
+        "open_commitments": [],
+    }
+    pipeline.provider = ScriptedProvider([ghost_move, ghost_move, ghost_move])
     events_before = [event.id for event in repository.list_events(session, project.active_timeline_id)]
     with pytest.raises(ValueError):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
     session.expire_all()
     assert [event.id for event in repository.list_events(session, project.active_timeline_id)] == events_before
-    generation = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert generation.status == "rejected"
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["rejected"] * 3
 
 
 @pytest.mark.asyncio
@@ -77,17 +80,28 @@ async def test_malformed_structured_envelope_fails_the_generation(session):
     pipeline.approve_scene(
         project_id=project.id, scene_id=scene.id, staging_revision=staged.structured_output["staging_revision"]
     )
-    pipeline.provider = ScriptedProvider([{"prose": [], "selected_actor": 5, "reason": 1}])
+    pipeline.provider = ScriptedProvider([{"prose": [], "selected_actor": 5, "reason": 1}] * 3)
     with pytest.raises(ValueError):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
-    generation = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert generation.status == "failed"
-    assert generation.trace["status"] == "traced"
+    generations = session.scalars(
+        select(Generation).where(Generation.scene_id == scene.id).order_by(Generation.created_at)
+    ).all()
+    assert [generation.status for generation in generations] == ["failed"] * 3
+    assert generations[0].trace["status"] == "traced"
 
 
 @pytest.mark.asyncio
 async def test_rejected_generation_can_be_retried_regenerated_or_rejected(session):
     project, character, scene = active_scene(session)
+    bad_turn = {
+        "selected_actor": character.id,
+        "reason": "scripted",
+        "prose": "An impossible claim.",
+        "actions": [],
+        "new_events": [{"event_type": "teleport_to_mars"}],
+        "state_changes": [],
+        "open_commitments": [],
+    }
     pipeline = NarrativePipeline(
         session,
         ScriptedProvider(
@@ -102,15 +116,9 @@ async def test_rejected_generation_can_be_retried_regenerated_or_rejected(sessio
                     "potential_consequences": [],
                     "canon_conflicts": [],
                 },
-                {
-                    "selected_actor": character.id,
-                    "reason": "scripted",
-                    "prose": "An impossible claim.",
-                    "actions": [],
-                    "new_events": [{"event_type": "teleport_to_mars"}],
-                    "state_changes": [],
-                    "open_commitments": [],
-                },
+                bad_turn,
+                bad_turn,
+                bad_turn,
             ]
         ),
     )
@@ -122,9 +130,16 @@ async def test_rejected_generation_can_be_retried_regenerated_or_rejected(sessio
     )
     with pytest.raises(ValueError, match="rejected before commit"):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
-    rejected = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert rejected.status == "rejected"
-    assert rejected.validation["recovery_actions"]
+    rejected = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    # One row per attempt: the retry is auditable rather than silent.
+    assert [generation.status for generation in rejected] == ["rejected"] * 3
+    assert rejected[0].validation["recovery_actions"]
 
     # Retry with a valid provider succeeds on the same scene.
     pipeline.provider = ScriptedProvider(
@@ -201,6 +216,21 @@ async def test_unknown_location_rejects_without_committing(session):
     project, character, scene = active_scene(session)
     session.add(Location(project_id=project.id, name="Library"))
     session.commit()
+    bad_move = {
+        "selected_actor": character.id,
+        "reason": "scripted",
+        "prose": "The witness leaves for somewhere uncharted.",
+        "actions": [],
+        "new_events": [
+            {
+                "event_type": "character_moved",
+                "character_id": character.id,
+                "location_id": "Atlantis",
+            }
+        ],
+        "state_changes": [],
+        "open_commitments": [],
+    }
     pipeline = NarrativePipeline(
         session,
         ScriptedProvider(
@@ -215,21 +245,9 @@ async def test_unknown_location_rejects_without_committing(session):
                     "potential_consequences": [],
                     "canon_conflicts": [],
                 },
-                {
-                    "selected_actor": character.id,
-                    "reason": "scripted",
-                    "prose": "The witness leaves for somewhere uncharted.",
-                    "actions": [],
-                    "new_events": [
-                        {
-                            "event_type": "character_moved",
-                            "character_id": character.id,
-                            "location_id": "Atlantis",
-                        }
-                    ],
-                    "state_changes": [],
-                    "open_commitments": [],
-                },
+                bad_move,
+                bad_move,
+                bad_move,
             ]
         ),
     )
@@ -244,9 +262,15 @@ async def test_unknown_location_rejects_without_committing(session):
         await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
     session.expire_all()
     assert [event.id for event in repository.list_events(session, project.active_timeline_id)] == events_before
-    generation = session.scalar(select(Generation).where(Generation.scene_id == scene.id))
-    assert generation.status == "rejected"
-    assert generation.validation["status"] == "rejected"
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["rejected"] * 3
+    assert generations[0].validation["status"] == "rejected"
 
 
 @pytest.mark.asyncio
@@ -296,3 +320,92 @@ async def test_provider_outage_leaves_no_partial_state(session):
         )
         == memories_before
     )
+
+
+@pytest.mark.asyncio
+async def test_performer_retry_feeds_back_the_error_and_records_each_attempt(session):
+    """A fixable model failure is retried with its own error, not just repeated.
+
+    The first attempt proposes the measured live failure (a character_moved
+    with no location_id); the retry carries the rejection note and a corrected
+    payload, and the turn completes. Both attempts leave Generation rows, so
+    the retry is auditable: one rejected, one completed, and nothing committed
+    before the successful attempt.
+    """
+
+    class RecordingProvider(ScriptedProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.prompts = []
+
+        async def structured(self, messages, schema, **kwargs):
+            self.prompts.append(messages[-1].content)
+            return await super().structured(messages, schema, **kwargs)
+
+    project, character, scene = active_scene(session)
+    pipeline = NarrativePipeline(
+        session,
+        RecordingProvider(
+            [
+                {
+                    "location": "Library",
+                    "time": "night",
+                    "characters_present": ["Witness"],
+                    "objective": "Wait.",
+                    "initial_conditions": [],
+                    "environmental_assumptions": [],
+                    "potential_consequences": [],
+                    "canon_conflicts": [],
+                },
+                {
+                    "selected_actor": character.id,
+                    "reason": "scripted",
+                    "prose": "The witness crosses the room.",
+                    "actions": [],
+                    "new_events": [
+                        {
+                            "event_type": "character_moved",
+                            "character_id": character.id,
+                            "action": "crosses the room",
+                        }
+                    ],
+                    "state_changes": [],
+                    "open_commitments": [],
+                },
+                {
+                    "selected_actor": character.id,
+                    "reason": "scripted",
+                    "prose": "The witness crosses to the desk.",
+                    "actions": [],
+                    "new_events": [
+                        {
+                            "event_type": "character_moved",
+                            "character_id": character.id,
+                            "action": "crosses to the desk",
+                            "location_id": "Library",
+                        }
+                    ],
+                    "state_changes": [],
+                    "open_commitments": [],
+                },
+            ]
+        ),
+    )
+    staged = await pipeline.stage(
+        project_id=project.id, premise="A staged scene", scene_id=scene.id, character_ids=[character.id]
+    )
+    pipeline.approve_scene(
+        project_id=project.id, scene_id=scene.id, staging_revision=staged.structured_output["staging_revision"]
+    )
+    result = await pipeline.continue_scene(project_id=project.id, scene_id=scene.id)
+    assert result.structured_output["selected_actor"] == character.id
+    assert "The previous reply was rejected" in pipeline.provider.prompts[-1]
+    assert "location_id" in pipeline.provider.prompts[-1]
+    generations = (
+        session.scalars(
+            select(Generation)
+            .where(Generation.scene_id == scene.id)
+            .order_by(Generation.created_at)
+        ).all()
+    )
+    assert [generation.status for generation in generations] == ["rejected", "completed"]

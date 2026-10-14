@@ -750,7 +750,18 @@ PERFORMER_SCHEMA: dict[str, Any] = {
         },
         "proposed_events": {
             "type": "array",
-            "description": "Proposed timeline events. Proposals only; the engine decides.",
+            "description": (
+                "Proposed timeline events. Proposals only; the engine decides. "
+                "Each type needs its fields, and incomplete events are rejected "
+                "whole: character_moved needs character_id and location_id (use "
+                "the SCENE Location value); character_spoke and "
+                "character_performed_action need character_id and text; "
+                "relationship_changed needs source_character_id and "
+                "target_character_id; knowledge changes need character_id and "
+                "fact; item and injury changes need character_id and the item "
+                "or injury; location_changed needs location_id. Emit only "
+                "complete events."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
