@@ -61,6 +61,46 @@ async def test_structured_adapter_rejects_non_json():
     await provider.close()
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '```json\n{"prose": "ok"}\n```',
+        '```\n{"prose": "ok"}\n```',
+        '\n  ```json\n{"prose": "ok"}\n```  \n',
+        '```json\n{"prose": "ok"}```',
+    ],
+)
+@pytest.mark.asyncio
+async def test_structured_adapter_strips_a_fence_pair_before_parsing(reply):
+    """A correct object in fences parses; the fence is decoration, not content.
+
+    Recorded against a live 4B model that returned a complete, well-formed
+    staging object inside ```json fences while told not to. Without stripping,
+    that turn fails although nothing about the object is wrong.
+    """
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return completion(reply)
+
+    provider = build(handler)
+    result = await provider.structured(
+        [ProviderMessage("user", "Return JSON")],
+        {"type": "object", "properties": {"prose": {"type": "string"}}},
+    )
+    await provider.close()
+    assert result == {"prose": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_structured_adapter_still_rejects_decorated_non_json():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return completion('```json\nnot json\n```')
+
+    provider = build(handler)
+    with pytest.raises(ProviderError):
+        await provider.structured([ProviderMessage("user", "Return JSON")], {"type": "object"})
+    await provider.close()
+
+
 def test_a_base_url_is_required():
     with pytest.raises(ProviderError):
         OpenAICompatibleProvider("", MODEL)
@@ -222,7 +262,6 @@ async def test_structured_output_keeps_the_caller_system_text_and_the_schema():
 @pytest.mark.parametrize(
     "raw",
     [
-        "```json\n{\"prose\": \"fenced\"}\n```",
         "Here is the JSON you asked for:\n{\"prose\": \"preceded\"}",
         "",
         "   ",
@@ -232,10 +271,11 @@ async def test_structured_output_keeps_the_caller_system_text_and_the_schema():
 async def test_structured_output_rejects_anything_json_loads_will_not_take(raw):
     """Pinned current behaviour, not a wish.
 
-    A local model that wraps its reply in a markdown fence fails the generation
-    today. That is worth knowing precisely, so the test records the fence and the
-    commentary case as failures: if a later change makes them succeed, this test
-    is what says so on purpose rather than by accident.
+    Replies with commentary around the object, or nothing at all, fail the
+    generation. A bare fence pair used to be in this list; fence stripping
+    deliberately removed it, because a correct object in fences is decorated
+    rather than wrong. If a later change makes the remaining cases succeed,
+    this test is what says so on purpose rather than by accident.
     """
 
     async def handler(request: httpx.Request) -> httpx.Response:

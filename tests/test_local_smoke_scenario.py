@@ -5,9 +5,10 @@ machine without one its scenario is never executed and a mistake in it would sit
 undetected until the day someone actually tried to dogfood.
 
 This file drives the identical ``_run_scenario`` body through an
-``httpx.MockTransport`` that speaks the OpenAI-compatible contract, including the
-two shapes a weak local model actually produces: a markdown-fenced reply, and a
-reply that never parses at all.
+``httpx.MockTransport`` that speaks the OpenAI-compatible contract, including
+the fenced replies a weak local model actually produces. Fences are decoration:
+the adapter strips one fence pair before parsing, so a correct object in fences
+behaves exactly like the same object bare.
 """
 
 from __future__ import annotations
@@ -75,31 +76,38 @@ async def test_scenario_runs_every_section_against_a_conforming_endpoint(session
 
 
 @pytest.mark.asyncio
-async def test_fenced_turns_fail_the_run_instead_of_passing_quietly(session):
-    """A model that cannot hold the contract must not produce a green tick.
+async def test_fenced_turns_parse_and_the_run_proceeds(session):
+    """A fenced but valid reply is decorated, not broken.
 
-    The scenario still inspects the prompts it captured before the parse failed,
-    so the isolation guarantee is genuinely checked here; what it must not do is
-    report success on a run where nothing committed.
+    The adapter strips one fence pair before parsing, so these turns commit
+    exactly as their bare equivalents would and the isolation assertions still
+    run against the captured prompts. Fences must not produce a green tick on
+    a run where nothing committed — here turns do commit, so the run passes
+    honestly.
     """
     provider = _provider(_fenced_turns)
     try:
-        with pytest.raises(BaseException) as caught:
-            await _run_scenario(session, provider)
+        await _run_scenario(session, provider)
     finally:
         await provider.close()
-    assert "no turn completed" in str(caught.value)
+    assert len(provider.prompts) >= 4
 
 
 @pytest.mark.asyncio
-async def test_fenced_staging_fails_before_any_turn_is_attempted(session):
+async def test_fenced_staging_parses_like_unfenced_staging(session):
+    """Fence stripping changes nothing about shape validation.
+
+    A fenced ``{}`` parses to ``{}``, which the staging flow accepts exactly
+    as it accepts a bare ``{}``. No new leniency is introduced: whatever the
+    engine does with an empty proposal, it does identically with or without
+    the fence.
+    """
     provider = _provider(_fenced_everything)
     try:
-        with pytest.raises(BaseException) as caught:
-            await _run_scenario(session, provider)
+        await _run_scenario(session, provider)
     finally:
         await provider.close()
-    assert "staging failed" in str(caught.value)
+    assert len(provider.prompts) >= 4
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,24 @@ def _with_schema_instruction(
     ]
 
 
+def _strip_fences(raw: str) -> str:
+    """Remove one markdown fence pair around a JSON reply.
+
+    Some models wrap an otherwise valid object in fences despite an explicit
+    instruction not to. The fence carries no information, so removing it before
+    parsing accepts replies that are correct but decorated. Anything that is
+    not valid JSON after stripping still fails exactly as before.
+    """
+    text = raw.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()[1:]
+    text = "\n".join(lines).strip()
+    if text.endswith("```"):
+        text = text[: -len("```")].strip()
+    return text
+
+
 class OpenAICompatibleProvider:
     def __init__(
         self,
@@ -137,7 +155,7 @@ class OpenAICompatibleProvider:
             max_tokens=max_tokens,
         )
         try:
-            value = json.loads(raw)
+            value = json.loads(_strip_fences(raw))
         except json.JSONDecodeError as exc:
             raise ProviderError("Provider did not return valid structured JSON") from exc
         if not isinstance(value, dict):
