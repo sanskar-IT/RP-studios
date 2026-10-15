@@ -911,17 +911,21 @@ def scenario_h_unavailable_characters(db: Session) -> ScenarioResult:
     )
     kill(db, world, world.suspect)
     # Refuse a turn in which the Performer writes the dead suspect and the
-    # off-stage librarian.
+    # off-stage librarian. The violating turn is supplied three times so all
+    # three Performer attempts fail identically; the positive control follows.
+    refused = turn(
+        prose="The suspect rises and walks out. The librarian watches from the doorway.",
+        dialogue=[{"character_id": world.suspect.id, "line": "I have somewhere to be."}],
+        actions=[
+            {"character_id": world.suspect.id, "action": "stands up", "kind": "decision"},
+            {"character_id": world.offstage.id, "action": "watches", "kind": "reaction"},
+        ],
+    )
     pipeline = world.pipeline(
         db,
-        turn(
-            prose="The suspect rises and walks out. The librarian watches from the doorway.",
-            dialogue=[{"character_id": world.suspect.id, "line": "I have somewhere to be."}],
-            actions=[
-                {"character_id": world.suspect.id, "action": "stands up", "kind": "decision"},
-                {"character_id": world.offstage.id, "action": "watches", "kind": "reaction"},
-            ],
-        ),
+        refused,
+        refused,
+        refused,
         turn(
             prose="The witness turns to the door and puts her shoulder to it.",
             actions=[{"character_id": world.witness.id, "action": "bars the door", "kind": "decision"}],

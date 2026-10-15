@@ -38,6 +38,7 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = [
   "smoke: opt-in tests that may call a configured external model provider",
+  "diagnose: opt-in diagnostic runs that call a configured external model provider and persist sanitized JSONL records",
   "postgres: opt-in tests that require NARRATIVE_TEST_DATABASE_URL to point at a PostgreSQL database with pgvector",
 ]
 asyncio_default_fixture_loop_scope = "function"
