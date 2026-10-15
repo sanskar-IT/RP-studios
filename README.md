@@ -814,6 +814,19 @@ every time. And repeated runs vary: structured calls default to temperature
 model, the six variables above, and the engine revision, and keep them frozen
 for the whole batch.
 
+When a turn fails and the report is not enough, collect termination records:
+
+```text
+pytest -m diagnose
+```
+
+This drives the same scenario through a logging transport and writes one JSONL
+file per run to `NARRATIVE_DIAG_OUT` (default: the OS temp dir, never the
+repo). Each provider call records `finish_reason`, `usage` token counts,
+latency, the raw reply, and transport failures, with credentials redacted. See
+[Termination diagnostics](docs/PROVIDERS.md#termination-diagnostics). The test
+self-skips without provider configuration, like the smoke tests.
+
 **A green smoke run is a wiring check, not a quality check.** It confirms the
 endpoint answers and that the engine commits or refuses cleanly. It does not
 establish that the prose is good, and it does not establish that the model kept a

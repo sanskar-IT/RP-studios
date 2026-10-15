@@ -92,7 +92,7 @@ The schema instruction is now folded into the caller's leading system messages, 
 
 **Open: structured output is prompt-injected, not negotiated.** The adapter does not send `response_format` or `json_schema`, even though Ollama supports both. Instead the schema rides in the system message and the reply goes through a bare `json.loads`, preceded only by stripping one markdown fence pair and surrounding whitespace.
 
-On a 4B model this was the difference between a working turn and a failed one. Asked for a staging object with the instruction "Do not include markdown fences", it returned a complete, well-formed, detailed object wrapped in ```` ```json ````. That shape now parses. What still fails is commentary around the object, an empty reply, or a brace-salvageable truncation: there is no brace salvage and no retry, so those turns are recorded as failed and nothing is committed. A larger or better instruction-following model will do better on the remaining shapes.
+On a 4B model this was the difference between a working turn and a failed one. Asked for a staging object with the instruction "Do not include markdown fences", it returned a complete, well-formed, detailed object wrapped in ```` ```json ````. That shape now parses, and a failed Performer call is retried twice with its validation errors fed back. What still fails is commentary around the object, an empty reply, or a brace-salvageable truncation: there is no brace salvage, so those turns are recorded as failed and nothing is committed. A larger or better instruction-following model will do better on the remaining shapes.
 
 `NARRATIVE_PROVIDER_FEATURES` is declaration only. It populates the capability report and the degradation notes; it does not change the request.
 
@@ -113,6 +113,53 @@ pytest -m smoke
 With Ollama running and the variables above exported, that exercise makes one real completion against the configured endpoint and closes it cleanly. It asserts connectivity and nothing else: it does not exercise the pipeline, does not measure narrative quality, and does not check knowledge isolation.
 
 `tests/test_local_smoke.py` is the deeper opt-in scenario. It builds three characters with separate private knowledge, possesses one of them, runs one turn per character through the real `NarrativePipeline`, and checks the engine's guarantees against a live model. Its assertions cover the prompt assembler and the event pipeline. Its model-dependent output is reported rather than asserted, because a green run says nothing about whether the prose is good or whether the model itself respected the knowledge boundary. Read the report; do not treat the exit code as a quality signal.
+
+## Termination diagnostics
+
+`tests/test_local_diagnostics.py` (marker `diagnose`) drives the same scenario
+through a logging transport that records what the production adapter discards:
+per call, `finish_reason`, `usage` token counts, latency, the raw reply, and
+transport failures. Run it with the same six variables as the smoke test, plus
+an output dir:
+
+```text
+pytest -m diagnose
+```
+
+```text
+NARRATIVE_DIAG_OUT=/tmp/narrative-diag
+```
+
+Records default to the OS temp dir, never the repo. One JSONL file per run;
+one line per event (`run`, `call`, `turn`, `generation`, `run_end`). The
+production path is untouched: the transport observes and re-emits, and the
+provider returns byte-identical results. Native Ollama `done_reason` is not
+observable through the OpenAI-compatible endpoint, so it is not recorded;
+`finish_reason` is mapped verbatim from it and is the reliable equivalent.
+Authorization headers and key material are redacted before anything is
+written, and unit tests pin both the capture and the redaction without a
+network.
+
+A sanitized `call` record looks like this (placeholders in angle brackets):
+
+```json
+{"type": "call", "seq": 2, "turn": "5b41665d", "attempt": 1,
+ "method": "POST", "url": "<base>/v1/chat/completions",
+ "request_headers": {"content-type": "application/json", "content-length": "12345"},
+ "model": "<model>", "message_sizes": [{"role": "system", "chars": 412}, {"role": "user", "chars": 9876}],
+ "prompt_hash": "9f2c41ab77d01330", "temperature": 0.2, "max_tokens": null,
+ "latency_s": 12.8, "status": 200,
+ "finish_reason": "stop",
+ "usage": {"prompt_tokens": 2390, "completion_tokens": 562, "total_tokens": 2952},
+ "raw_chars": 2414, "raw": "<full reply text>",
+ "error": null, "run_id": "diag-20261015-124357"}
+```
+
+Read `finish_reason` first: `length` near the output budget is output-limit
+exhaustion, `stop` on a mid-object reply is the model stopping early, and
+prompt plus completion tokens against `num_ctx` settles context pressure. An
+`error` with no body near the timeout is a transport failure, not a model
+failure.
 
 ## Capability evolution
 
