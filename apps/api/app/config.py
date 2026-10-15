@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import BeforeValidator
+from pydantic import AliasChoices, BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     app_name: str = "AI Narrative Studio"
     database_url: str = "postgresql+psycopg://narrative:narrative@localhost:5432/narrative"
     cors_origins: str = "http://localhost:5173"
-    provider_name: str = "heuristic"
+    provider_name: str = Field(
+        default="heuristic",
+        validation_alias=AliasChoices("NARRATIVE_PROVIDER_NAME", "NARRATIVE_PROVIDER"),
+    )
     provider_base_url: str = ""
     provider_api_key: str = ""
     provider_model: str = ""
@@ -57,7 +60,9 @@ class Settings(BaseSettings):
     memory_candidate_pool: int = 400
     lore_token_budget: int = 2048
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="NARRATIVE_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_prefix="NARRATIVE_", extra="ignore", populate_by_name=True
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
