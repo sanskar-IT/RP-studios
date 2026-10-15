@@ -32,7 +32,7 @@ virtual environment created from `.env.example`.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Python suite | `pytest` | 350 passed, 13 skipped |
+| Python suite | `pytest` | 357 passed, 14 skipped |
 | Migrations | `pytest tests/test_migrations.py` | 8 passed |
 | Engine evaluation | `python -m services.evaluation.harness --print` | 20/20 runs pass (5 scenarios at 10, 25, 50, 100 turns), 0 invalid events, 0 knowledge leaks, 0 branch leaks |
 | Director evaluation | `python -m services.evaluation.director --print` | 8/8 scenarios |
@@ -362,7 +362,7 @@ API after editing it. The important ones:
 | --- | --- | --- |
 | `NARRATIVE_DATABASE_URL` | SQLAlchemy URL, PostgreSQL or SQLite | Local `narrative` database |
 | `NARRATIVE_CORS_ORIGINS` | Comma-separated allowed web origins | `http://localhost:5173` |
-| `NARRATIVE_PROVIDER` | `heuristic`, `openai_compatible`, `openai-compatible`, `local`, `ollama`, or `generic`; anything else falls back to `heuristic` | `heuristic` |
+| `NARRATIVE_PROVIDER` | `heuristic`, `openai_compatible`, `openai-compatible`, `local`, `ollama`, or `generic`; anything else falls back to `heuristic`. `NARRATIVE_PROVIDER_NAME` is also accepted and wins when both are set | `heuristic` |
 | `NARRATIVE_PROVIDER_BASE_URL` | OpenAI-compatible API base URL; must include any `/v1` prefix | Empty |
 | `NARRATIVE_PROVIDER_MODEL` | Model identifier sent to the provider | Empty |
 | `NARRATIVE_PROVIDER_API_KEY` | Provider credential read from the environment; leave empty for local servers | Empty |
@@ -678,6 +678,7 @@ The chain is explicit and reviewable, and the baseline no longer derives the dep
 | `0003_production_constraints` | Adds `(timeline_id, sequence)` uniqueness for `timeline_nodes` and `events`, and a partial unique index that allows one current scene per timeline |
 | `0004_context_reliability` | Adds memory `scope`, `is_active`, `superseded_by_id`, and `source_event_id`; commitment `timeline_id`, `forked_from_commitment_id`, and `created_sequence`; generation `context_debug`, `validation`, and `trace`; backfills legacy memory scope from class |
 | `0005_narrative_director` | Creates `director_plans`; adds `authority_mode` to `projects` and `scenes`; extends `director_intents` with the interpreted-intent and Director columns |
+| `0006_event_scene_visibility` | Adds nullable `events.scene_id` with index and foreign key, so the recent-events block can be scoped to the active scene; existing rows keep NULL and render as legacy |
 
 `0001_initial` does not call `Base.metadata.create_all`, so an applied database keeps the schema it was migrated to even as the models move. The column and constraint guards in the later revisions exist for databases that were created by the previous dynamic baseline.
 
@@ -970,6 +971,16 @@ immediately. Recovery tests that pinned fail-fast now pin three-attempt
 exhaustion instead. Measured live: one rejected turn recovered to completed on
 retry; one turn failed all three attempts on truncated replies and surfaced the
 last error unchanged.
+
+### The documented provider variable now reaches the API
+
+Setting `NARRATIVE_PROVIDER=ollama` did nothing: the settings field is
+`provider_name`, which pydantic-settings reads from `NARRATIVE_PROVIDER_NAME`,
+a name nothing in the repo references. Every documented setup therefore ran
+the heuristic provider while looking configured. `provider_name` now accepts
+both spellings, with the full name winning when both are set, and three config
+tests pin the behaviour. Found during alpha launch when `/api/providers/capabilities`
+reported `heuristic` against a fully configured environment.
 
 ### The recent-events block is scoped to the active scene
 
