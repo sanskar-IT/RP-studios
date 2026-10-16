@@ -133,7 +133,11 @@ export default function CommandDock({
             </button>
           ))}
         </div>
-        {!canSubmit && <div className="command-guard">{blockedReason}</div>}
+        {!canSubmit && (
+          <div className="command-guard" role="status" aria-live="polite">
+            {blockedReason}
+          </div>
+        )}
       </div>
     </footer>
   );

@@ -106,7 +106,7 @@ export default function SessionBar({
       </div>
 
       {pendingApproval && (
-        <div className="session-bar__decision" role="status">
+        <div className="session-bar__decision" role="status" aria-live="polite">
           <p>
             The Director has a plan for this scene. Nothing has been performed yet — approve it
             to continue, or change the direction.

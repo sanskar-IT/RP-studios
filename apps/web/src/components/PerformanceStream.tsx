@@ -30,6 +30,7 @@ export default function PerformanceStream({ views, emptyHint, onForkFromLatest, 
         <div className="performance-empty">
           <div className="empty-orbit">✦</div>
           <h3>The stage is quiet.</h3>
+          <span className="performance-empty__next">Next step</span>
           <p>{emptyHint}</p>
         </div>
       </div>
