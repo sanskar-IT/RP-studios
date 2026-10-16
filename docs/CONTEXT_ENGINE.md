@@ -348,9 +348,12 @@ yet**, so no within-scene line is withheld and there is no per-viewer marker.
 `ActorBrief.present` is `not dead`, so every participant counts as present;
 presence becomes selective only when a character can be a participant of a scene
 and not be in the room. Operator- and timeline-scoped events (canon divergence,
-state correction, commitment lifecycle, forks) carry no scene and reach every
-scene by design, because they change what is true for the whole timeline. The
-history digest is scoped the same way as the recent-events block.
+state correction, retcon intents, commitment lifecycle, forks) carry no scene and
+reach every scene by design, because they change what is true for the whole
+timeline. Direction, narration, and story-commitment intents stay scene-scoped;
+retcon is the only Director intent promoted to the timeline. The history digest
+is scoped the same way as the recent-events block and counts only event kinds and
+totals, never payloads.
 
 `_overhear` still records no suspicion when the claim is a paraphrase rather
 than the verbatim fact. The principled fix is to make `_overhear` fail *open*

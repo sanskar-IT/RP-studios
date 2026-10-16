@@ -104,20 +104,27 @@ scene-bound commit site in the pipeline. `append_event` takes `scene_id` as a
 required keyword with no default, so a forgotten attribution raises `TypeError`
 instead of silently producing a row that renders in every scene — attribution is
 a decision, not a default. Operator- and timeline-scoped commits (canon
-divergence, state correction, commitment lifecycle, forks) pass `scene_id=None`
-explicitly: they change what is true for the whole timeline and are meant to
-reach every scene. Rows committed before the migration are NULL and keep
-rendering everywhere: no backfill is attempted, because the scene of a
-historical event cannot be derived reliably and silently redacting history
-would be worse than showing it.
+divergence, state correction, retcon intents, commitment lifecycle, forks) pass
+`scene_id=None` explicitly: they change what is true for the whole timeline and
+are meant to reach every scene. Direction, narration, and story-commitment
+intents stay scene-scoped, because they direct the room the user is in; retcon
+is the only Director intent promoted to the timeline, because "ignore canon"
+changes what is true everywhere. A generation rejection inherits the rejected
+generation's scene, so it shares the boundary of the beat it disowns. Rows
+committed before the migration are NULL and keep rendering everywhere: no
+backfill is attempted, because the scene of a historical event cannot be derived
+reliably and silently redacting history would be worse than showing it.
 
 The history digest obeys the same boundary as the recent-events block: it counts
-only the active scene's events plus legacy NULL rows, so one scene's event
-composition cannot describe itself into another scene's prompt.
+only the active scene's events plus timeline-scoped NULL rows, so one scene's
+event composition cannot describe itself into another scene's prompt. It counts
+only event kinds and totals, never payloads, so no scene-local content crosses
+the boundary through it.
 
 The harness runs single-scene scenarios, so its `no_scene_leak` scorer passes
 vacuously on today's fixtures. The primary signals are the deterministic tests in
 `tests/test_knowledge_isolation.py` (replays the measured case from this ADR — a
 stranger reading the scene-1 secret — and fails on the pre-change code) and
 `tests/test_scene_attribution.py` (pins the operator-versus-scene distinction,
-the digest's scene scope, and explicit attribution).
+the retcon-versus-direction split, possession attribution symmetry, rejection
+inheritance, the digest's scene scope, and explicit attribution).

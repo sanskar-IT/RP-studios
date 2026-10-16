@@ -1197,6 +1197,13 @@ class NarrativePipeline:
         )
         self.db.add(commitment)
         self.db.flush()
+        # A retcon changes what is true for the whole timeline ("ignore canon",
+        # "break canon"), so its intent is committed timeline-scoped and reaches
+        # every scene. Direction, narration, and story commitments stay
+        # scene-scoped: they direct the room the user is in. The intent row keeps
+        # the issuing scene for audit; only the committed event's visibility is
+        # timeline-wide.
+        event_scene_id = None if resolved_type == IntentType.RETCON.value else scene_id
         repository.append_event(
             self.db,
             project_id=project_id,
@@ -1211,7 +1218,7 @@ class NarrativePipeline:
                 "literal_action": resolved_type == IntentType.IMMEDIATE_ACTION.value,
             },
             source=EventSource.USER,
-            scene_id=scene_id,
+            scene_id=event_scene_id,
         )
         if resolved_type == IntentType.IMMEDIATE_ACTION.value:
             repository.append_event(
@@ -1398,6 +1405,7 @@ class NarrativePipeline:
             event_type=POSSESSION_CHANGED,
             payload={"scene_id": scene_id, "character_id": character_id, "control_mode": ControlMode.AI.value},
             source=EventSource.USER,
+            actor_character_id=character_id,
             scene_id=scene_id,
         )
         self.db.commit()
@@ -1437,6 +1445,10 @@ class NarrativePipeline:
         if generation.project_id != project_id:
             raise ValueError("Generation does not belong to project")
         timeline_id = generation.timeline_id or self._default_timeline(project_id)
+        # A rejection inherits the rejected generation's scene: it comments on a
+        # scene-bound beat, so it belongs to the same trust boundary as the beat
+        # it disowns. A generation with no scene (only possible for rows created
+        # outside the turn pipeline) produces a timeline-scoped rejection.
         event, _, state = repository.append_event(
             self.db,
             project_id=project_id,
@@ -2786,10 +2798,11 @@ class NarrativePipeline:
         scene is by definition a participant of it; per-viewer presence is not
         modelled yet, so no within-scene line is withheld. Operator- and
         timeline-scoped events carry no scene (``scene_id`` is ``None``) and
-        render in every scene by design: they change what is true for the whole
-        timeline, not for one room. Rows committed before scene attribution
-        existed also carry no scene and render everywhere; they are legacy, not a
-        second rule.
+        render in every scene by design: canon divergence, world-fact correction,
+        commitment lifecycle, retcon intents, and forks change what is true for
+        the whole timeline, not for one room. Rows committed before scene
+        attribution existed also carry no scene and render everywhere; they are
+        legacy, not a second rule.
 
         ``knowledge_*`` payloads are still redacted for any viewer other than the
         belief's owner. Rendering raw event payloads here leaked knowledge: a
@@ -2826,12 +2839,15 @@ class NarrativePipeline:
         """A counted digest of everything older than the recent tail.
 
         Scoped the same way as ``_recent_events``: a scene sees the digest of the
-        active scene plus legacy rows with no scene, so the same trust boundary
-        governs both blocks and one scene's composition does not describe itself
-        into another scene's prompt. The previous engine had no representation of
-        older history at all. A count plus the distinct event kinds is enough for
-        a model to know that material exists without paying for a transcript it
-        cannot use.
+        active scene plus timeline-scoped rows with no scene. Those ``scene_id``
+        ``None`` rows are operator and retcon events (canon divergence, world-fact
+        correction, commitment lifecycle, retcon intents, forks) plus legacy rows
+        committed before scene attribution existed; they describe what is true for
+        the whole timeline and are meant to reach every scene. Scene-bound events
+        are counted only in their own scene, so one scene's event composition does
+        not describe itself into another scene's prompt. The digest counts only
+        event kinds and totals, never payloads, so no scene-local content crosses
+        the boundary through it.
         """
         total = (
             self.db.scalar(
