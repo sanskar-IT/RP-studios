@@ -664,6 +664,7 @@ def _check_branch_isolation(
         event_type=WORLD_FACT_CREATED,
         payload={"fact_id": "harbour-still-sealed", "text": "the harbour gate remains sealed in this branch"},
         source=EventSource.USER,
+        scene_id=None,
     )
     db.commit()
     parent_after = set(repository.current_state(db, timeline_id).world_facts)

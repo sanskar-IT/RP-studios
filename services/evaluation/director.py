@@ -238,6 +238,7 @@ def seed_private_knowledge(db: Session, world: World) -> None:
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": world.general.id, "fact": SECRET},
         source=EventSource.USER.value,
+        scene_id=None,
     )
     repository.append_event(
         db,
@@ -246,6 +247,7 @@ def seed_private_knowledge(db: Session, world: World) -> None:
         event_type=KNOWLEDGE_SUSPECTED,
         payload={"character_id": world.witness.id, "fact": SECRET},
         source=EventSource.USER.value,
+        scene_id=None,
     )
     db.commit()
 

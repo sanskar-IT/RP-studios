@@ -180,6 +180,36 @@ def test_vertical_slice_downgrade_removes_its_own_columns(tmp_path):
         engine.dispose()
 
 
+def test_event_scene_visibility_downgrade_removes_column_index_and_foreign_key(tmp_path):
+    url = sqlite_url(tmp_path, "scene_downgrade.db")
+    upgrade(url)
+    downgrade(url, "0005_narrative_director")
+    engine = create_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert "scene_id" not in {column["name"] for column in inspector.get_columns("events")}
+        assert "ix_events_scene_id" not in {
+            index["name"] for index in inspector.get_indexes("events")
+        }
+        assert ("scene_id",) not in {
+            tuple(foreign_key["constrained_columns"])
+            for foreign_key in inspector.get_foreign_keys("events")
+        }
+    finally:
+        engine.dispose()
+    upgrade(url)
+    engine = create_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert "scene_id" in {column["name"] for column in inspector.get_columns("events")}
+        assert "ix_events_scene_id" in {
+            index["name"] for index in inspector.get_indexes("events")
+        }
+        assert metadata_diff(engine) == []
+    finally:
+        engine.dispose()
+
+
 def test_downgrade_base_drops_a_populated_database_in_dependency_order(
     tmp_path, foreign_keys_enforced: None
 ):
@@ -203,6 +233,7 @@ def test_downgrade_base_drops_a_populated_database_in_dependency_order(
                 timeline_id=project.active_timeline_id,
                 event_type=CHARACTER_MOVED,
                 payload={"character_id": character.id, "location_id": "library"},
+                scene_id=scene.id,
             )
             repository.add_generation(
                 session,

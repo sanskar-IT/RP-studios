@@ -228,6 +228,7 @@ def seed_secret(db: Session, world: World) -> None:
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": world.suspect.id, "fact": SECRET},
         source="user",
+        scene_id=None,
     )
     db.commit()
 
@@ -240,6 +241,7 @@ def kill(db: Session, world: World, character: Any) -> None:
         event_type="character_died",
         payload={"character_id": character.id, "cause": "the scene's doing"},
         source="ai",
+        scene_id=None,
     )
     db.commit()
 
@@ -549,6 +551,7 @@ def scenario_d_character_agency(db: Session) -> ScenarioResult:
         event_type="knowledge_suspected",
         payload={"character_id": world.detective.id, "fact": "the witness is hiding something"},
         source="user",
+        scene_id=None,
     )
     db.commit()
     pipeline = world.pipeline(
@@ -1011,6 +1014,7 @@ def scenario_i_knowledge_isolation(db: Session) -> ScenarioResult:
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": world.detective.id, "fact": OWN_FACT},
         source="user",
+        scene_id=None,
     )
     db.commit()
     world.activate(db)

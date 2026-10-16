@@ -38,8 +38,9 @@ something scene participation already answers.
 
 **Presence** — Whether a character was in the room when something happened. This
 is currently assigned `not dead` (`ActorBrief.present`), so presence means "alive
-and a participant" and every viewer of the recent-events block satisfies it. The
-gate is written down before it becomes selective.
+and a participant" and every viewer of the recent-events block satisfies it. No
+within-scene line is withheld today; the rule is written down before it becomes
+selective.
 
 **Ambient content** — Something that happened in the room and is not anyone's
 knowledge: dialogue that states no fact, incidental observation, a question.

@@ -306,7 +306,6 @@ PRIVATE_KNOWLEDGE_EVENTS = frozenset(
     {"knowledge_acquired", "knowledge_suspected", "knowledge_refuted"}
 )
 WITHHELD_KNOWLEDGE = "[a fact another character has not shared is withheld]"
-WITHHELD_SPEECH = "[a line spoken where this character was not present is withheld]"
 
 # Events that are spoken aloud. Whatever they state in front of the scene is
 # overheard: listeners gain it as suspicion, never as certainty, because hearing
@@ -1419,6 +1418,7 @@ class NarrativePipeline:
             event_type=CANON_DIVERGENCE,
             payload={"text": text, "canon_reference": canon_reference, "accepted": True},
             source=EventSource.USER,
+            scene_id=None,
         )
         self.db.commit()
         return PipelineResult(timeline_id=timeline_id, generation_id=event.id, state=state.to_dict())
@@ -1482,6 +1482,7 @@ class NarrativePipeline:
             event_type=WORLD_FACT_MODIFIED,
             payload={"fact_id": fact_id, **changes, "note": note, "corrected": True},
             source=EventSource.USER,
+            scene_id=None,
         )
         self.db.commit()
         return PipelineResult(timeline_id=timeline_id, generation_id=event.id, state=state.to_dict())
@@ -1808,6 +1809,7 @@ class NarrativePipeline:
                     "progress": progress if progress is not None else commitment.progress,
                 },
                 source=EventSource.USER,
+                scene_id=None,
             )
             commitment.status = target.value
             if progress is not None:
@@ -2777,18 +2779,24 @@ class NarrativePipeline:
     ) -> list[str]:
         """The tail of the active scene, with other characters' knowledge redacted.
 
-        A scene is a trust boundary (ADR 0004): only events attributed to the
-        active scene render, so a line spoken in one scene never appears in
-        another scene's prompts. Rows committed before scene attribution existed
-        carry no scene and still render everywhere; they are legacy, not a
-        second rule. Within the scene, a speech line is visible to a viewer who
-        was present or who spoke it; anyone else gets a marker. Beliefs are
-        never consulted for visibility. Rendering raw event payloads here leaked
-        knowledge: a ``knowledge_acquired`` event recorded for one character was
-        readable verbatim in another character's prompt. A fact another
-        character has not shared is replaced with a marker, not with the fact.
+        Scene scoping is the mechanism that enforces isolation (ADR 0004): only
+        events attributed to the active scene render, so a line spoken in one
+        scene never appears in another scene's prompts. Within the active scene,
+        every event is shown to every viewer, because a character prompting the
+        scene is by definition a participant of it; per-viewer presence is not
+        modelled yet, so no within-scene line is withheld. Operator- and
+        timeline-scoped events carry no scene (``scene_id`` is ``None``) and
+        render in every scene by design: they change what is true for the whole
+        timeline, not for one room. Rows committed before scene attribution
+        existed also carry no scene and render everywhere; they are legacy, not a
+        second rule.
+
+        ``knowledge_*`` payloads are still redacted for any viewer other than the
+        belief's owner. Rendering raw event payloads here leaked knowledge: a
+        ``knowledge_acquired`` event recorded for one character was readable
+        verbatim in another character's prompt. A fact another character has not
+        shared is replaced with a marker, not with the fact.
         """
-        present_ids = _scene_participant_ids(self.db, scene_id) if scene_id else set()
         rows = list(
             self.db.scalars(
                 select(Event)
@@ -2811,38 +2819,40 @@ class NarrativePipeline:
                 summary = json.dumps(payload, sort_keys=True, default=str)[:160]
             if event.event_type in PRIVATE_KNOWLEDGE_EVENTS and payload.get("character_id") != actor_id:
                 summary = WITHHELD_KNOWLEDGE
-            speaker = str(payload.get("character_id") or event.actor_character_id or "")
-            if (
-                event.event_type == "character_spoke"
-                and speaker
-                and speaker != actor_id
-                and actor_id not in present_ids
-            ):
-                summary = WITHHELD_SPEECH
             lines.append(f"#{event.sequence} {event.event_type}: {summary}")
         return lines
 
-    def _history_digest(self, timeline_id: str) -> str:
+    def _history_digest(self, timeline_id: str, scene_id: str | None) -> str:
         """A counted digest of everything older than the recent tail.
 
-        The previous engine had no representation of older history at all. A
-        count plus the distinct event kinds is enough for a model to know that
-        material exists without paying for a transcript it cannot use.
+        Scoped the same way as ``_recent_events``: a scene sees the digest of the
+        active scene plus legacy rows with no scene, so the same trust boundary
+        governs both blocks and one scene's composition does not describe itself
+        into another scene's prompt. The previous engine had no representation of
+        older history at all. A count plus the distinct event kinds is enough for
+        a model to know that material exists without paying for a transcript it
+        cannot use.
         """
-        total = self.db.scalar(
-            select(func.count(Event.id)).where(Event.timeline_id == timeline_id)
-        ) or 0
+        total = (
+            self.db.scalar(
+                select(func.count(Event.id))
+                .where(Event.timeline_id == timeline_id)
+                .where(or_(Event.scene_id == scene_id, Event.scene_id.is_(None)))
+            )
+            or 0
+        )
         if total <= HISTORY_DIGEST_AFTER:
             return ""
         kinds = self.db.execute(
             select(Event.event_type, func.count(Event.id))
             .where(Event.timeline_id == timeline_id)
+            .where(or_(Event.scene_id == scene_id, Event.scene_id.is_(None)))
             .group_by(Event.event_type)
             .order_by(desc(func.count(Event.id)))
         ).all()
         summary = ", ".join(f"{kind} x{count}" for kind, count in kinds)
         return (
-            f"{total} events are recorded on this timeline. "
+            f"{total} events are recorded on this timeline for the active scene. "
             f"Breakdown by kind: {summary}. "
             "Ask for a detail only if the current instruction depends on it."
         )
@@ -2904,7 +2914,7 @@ class NarrativePipeline:
             recent_events=self._recent_events(scene.timeline_id, scene.id, actor_id=actor.id if actor else None),
             memories=memory_lines,
             lore=[(entry.name or entry.entry_id, entry.content) for entry in lore_debug.activated],
-            history=self._history_digest(scene.timeline_id),
+            history=self._history_digest(scene.timeline_id, scene.id),
             flavor="",
             estimator=estimator,
             budget=self._token_budget(),

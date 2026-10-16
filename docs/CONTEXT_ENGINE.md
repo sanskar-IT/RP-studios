@@ -341,13 +341,16 @@ closed too, by ADR 0004.
 
 `_recent_events` renders only the active scene: events carry the scene that
 produced them (migration `0006_event_scene_visibility`), and a line spoken in
-one scene no longer appears in another scene's prompts. Within the scene, a
-speech line is visible to a viewer who was present or who spoke it; anyone
-else gets a marker, and beliefs are never consulted for visibility. Showing
-speech to a character who was in the room is accurate, not a leak. The presence
-half is still vacuous in practice — `ActorBrief.present` is `not dead`, so
-every participant counts as present — until per-turn physical presence is
-modelled.
+one scene no longer appears in another scene's prompts. This scene filter is the
+mechanism that enforces isolation. Within the scene, the block renders the
+scene's events to the scene's viewers; per-viewer presence is **not modelled
+yet**, so no within-scene line is withheld and there is no per-viewer marker.
+`ActorBrief.present` is `not dead`, so every participant counts as present;
+presence becomes selective only when a character can be a participant of a scene
+and not be in the room. Operator- and timeline-scoped events (canon divergence,
+state correction, commitment lifecycle, forks) carry no scene and reach every
+scene by design, because they change what is true for the whole timeline. The
+history digest is scoped the same way as the recent-events block.
 
 `_overhear` still records no suspicion when the claim is a paraphrase rather
 than the verbatim fact. The principled fix is to make `_overhear` fail *open*
@@ -358,7 +361,9 @@ is consumed. It is deferred rather than half-applied.
 `test_recent_events_show_speech_to_characters_present_in_the_scene`
 (`tests/test_knowledge_isolation.py`) pins the within-room behaviour, and
 `test_recent_events_hide_speech_from_another_scene` replays the measured
-cross-scene leak and fails on the pre-change code.
+cross-scene leak and fails on the pre-change code. `tests/test_scene_attribution.py`
+pins the operator-versus-scene distinction, the digest's scene scope, and that
+every event write names its scene explicitly.
 
 ## 2.4 Validation and contradictions
 

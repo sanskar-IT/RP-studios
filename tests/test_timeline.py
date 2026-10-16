@@ -16,6 +16,7 @@ def test_fork_preserves_original_and_uses_checkpoint(session):
         timeline_id=project.active_timeline_id,
         event_type="character_moved",
         payload={"character_id": character.id, "location_id": "library"},
+        scene_id=None,
     )
     session.commit()
     original_events = list(session.scalars(select(Event).where(Event.timeline_id == project.active_timeline_id)))
@@ -43,6 +44,7 @@ def test_character_state_projection_is_written(session):
         timeline_id=project.active_timeline_id,
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": character.id, "fact": "the decree is forged"},
+        scene_id=None,
     )
     session.commit()
     row = session.scalar(select(CharacterState).where(CharacterState.character_id == character.id))

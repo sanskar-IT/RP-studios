@@ -97,13 +97,24 @@ def append_event(
     project_id: str,
     timeline_id: str,
     event_type: str,
+    scene_id: str | None,
     payload: dict[str, Any] | None = None,
     source: EventSource | str = EventSource.SYSTEM,
     actor_character_id: str | None = None,
     causation_id: str | None = None,
     idempotency_key: str | None = None,
-    scene_id: str | None = None,
 ) -> tuple[Event, TimelineNode, StateSnapshot]:
+    """Append one event and project it into the timeline checkpoint.
+
+    ``scene_id`` is required so attribution is always an explicit decision rather
+    than a default that silently produces a legacy row. A scene-bound event names
+    the scene that produced it and renders only in that scene's recent-history
+    block. A timeline- or operator-scoped event — canon divergence, world-fact
+    correction, commitment lifecycle, forks — passes ``None`` and renders in every
+    scene, because it changes what is true for the whole timeline rather than for
+    one room. ``None`` is also how rows committed before migration
+    ``0006_event_scene_visibility`` read.
+    """
     if event_type not in KNOWN_EVENT_TYPES:
         raise ValueError(f"Unsupported narrative event type: {event_type}")
     event_payload = dict(payload or {})
@@ -258,6 +269,7 @@ def cancel_scene_event(db: Session, scene: Scene) -> Event:
         event_type=SCENE_CANCELLED,
         payload={"scene_id": scene.id, "title": scene.title},
         source=EventSource.USER,
+        scene_id=scene.id,
     )
     set_scene_status(db, scene, SceneStatus.CANCELLED)
     return event
@@ -411,6 +423,7 @@ def fork_timeline(db: Session, *, source_timeline_id: str, source_node_id: str, 
             "name": name,
         },
         source=EventSource.SYSTEM,
+        scene_id=None,
     )
     db.flush()
     return branch

@@ -143,6 +143,7 @@ def test_core_entities_persist_and_reload(session: Session):
         timeline_id=project.active_timeline_id,
         event_type=CHARACTER_MOVED,
         payload={"character_id": character.id, "location_id": "library"},
+        scene_id=scene.id,
     )
     repository.add_generation(
         session,
@@ -203,6 +204,7 @@ def test_json_columns_round_trip_without_loss(session: Session):
         timeline_id=project.active_timeline_id,
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": character.id, "fact": "the decree is forged"},
+        scene_id=scene.id,
     )
     repository.add_memory(
         session,
@@ -278,6 +280,7 @@ def test_timeline_fork_preserves_source_and_branch_state(session: Session):
         timeline_id=project.active_timeline_id,
         event_type=CHARACTER_MOVED,
         payload={"character_id": character.id, "location_id": "library"},
+        scene_id=None,
     )
     repository.add_memory(
         session,
@@ -321,6 +324,7 @@ def test_timeline_fork_preserves_source_and_branch_state(session: Session):
         timeline_id=branch.id,
         event_type=KNOWLEDGE_ACQUIRED,
         payload={"character_id": character.id, "fact": "the branch diverges"},
+        scene_id=None,
     )
     session.commit()
     assert len(repository.list_events(session, branch.id)) == 2
@@ -335,6 +339,7 @@ def test_production_constraints_reject_duplicate_order_and_second_current_scene(
         timeline_id=project.active_timeline_id,
         event_type=CHARACTER_MOVED,
         payload={"character_id": character.id, "location_id": "library"},
+        scene_id=scene.id,
     )
     session.commit()
     session.add(

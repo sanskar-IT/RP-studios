@@ -146,6 +146,7 @@ def _seed_private_knowledge(session, project, characters: list[Character], facts
             event_type=KNOWLEDGE_ACQUIRED,
             payload={"character_id": character.id, "fact": facts[character.name]},
             source=EventSource.USER,
+            scene_id=None,
         )
     session.commit()
 
