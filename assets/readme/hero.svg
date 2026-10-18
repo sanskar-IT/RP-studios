@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">AI Narrative Studio</title>
+  <desc id="hero-desc">Title card: a self-hosted narrative simulation desk. One turn runs through Intent Router, Director, Performer, Validation, and Commit, and ends as an append-only event plus a checkpoint.</desc>
+
+  <rect width="1200" height="400" rx="24" fill="#0E1116"/>
+
+  <g id="title-block">
+    <rect x="64" y="70" width="44" height="4" rx="2" fill="#E0A458"/>
+    <text x="64" y="112" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" letter-spacing="2" fill="#7C838F">SELF-HOSTED  ·  SINGLE-USER  ·  LOCAL-FIRST</text>
+
+    <text x="64" y="182" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="48" font-weight="700" fill="#ECE8E1">AI Narrative Studio</text>
+
+    <text x="64" y="228" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="21" fill="#C9C4BC">A narrative simulation desk where structured events,</text>
+    <text x="64" y="258" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="21" fill="#C9C4BC">checkpoints, and state projections decide what is true.</text>
+    <text x="64" y="288" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="21" fill="#7C838F">Not the chat transcript.</text>
+
+    <rect x="64" y="320" width="500" height="1" fill="#232A33"/>
+    <text x="64" y="352" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">Python 3.12  ·  FastAPI  ·  React + Vite  ·  PostgreSQL + pgvector</text>
+  </g>
+
+  <g id="turn-panel">
+    <rect x="664" y="56" width="472" height="288" rx="18" fill="#151A21" stroke="#232A33"/>
+    <text x="696" y="94" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" letter-spacing="1.5" fill="#7C838F">ONE TURN, END TO END</text>
+
+    <line x1="712" y1="132" x2="712" y2="312" stroke="#232A33" stroke-width="2"/>
+
+    <circle cx="712" cy="132" r="6" fill="#5B8DEF"/>
+    <text x="738" y="137" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" fill="#ECE8E1">Intent Router</text>
+    <text x="1112" y="136" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">pure function</text>
+
+    <circle cx="712" cy="178" r="6" fill="#5B8DEF"/>
+    <text x="738" y="183" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" fill="#ECE8E1">Director</text>
+    <text x="1112" y="182" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">every turn</text>
+
+    <circle cx="712" cy="224" r="6" fill="#E0A458"/>
+    <text x="738" y="229" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" fill="#ECE8E1">Performer</text>
+    <text x="1112" y="228" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">one turn of prose</text>
+
+    <circle cx="712" cy="270" r="6" fill="#7C838F"/>
+    <text x="738" y="275" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" fill="#ECE8E1">Validation</text>
+    <text x="1112" y="274" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">four checks</text>
+
+    <circle cx="712" cy="316" r="6" fill="#6FCF97"/>
+    <text x="738" y="321" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" fill="#ECE8E1">Commit</text>
+    <text x="1112" y="320" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">event + checkpoint</text>
+  </g>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="176" height="28" viewBox="0 0 176 28" role="img" aria-labelledby="b-selfhosted">
+  <title id="b-selfhosted">Self-hosted</title>
+  <desc id="b-selfhosted">Stack badge: self-hosted.</desc>
+  <rect width="176" height="28" rx="6" fill="#151A21" stroke="#232A33"/>
+  <circle cx="16" cy="14" r="4" fill="#7C838F"/>
+  <text x="30" y="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#C9C4BC">Self-hosted</text>
+</svg>

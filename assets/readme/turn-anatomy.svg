@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="turn-title turn-desc">
+  <title id="turn-title">Anatomy of one turn</title>
+  <desc id="turn-desc">Four layers run in order inside a single API request: the Intent Router assigns a lane without calling a provider, the Director runs every turn, the Performer writes one turn of prose and proposes events, and validation plus commit turn accepted claims into an append-only event and a checkpoint.</desc>
+
+  <rect width="1200" height="560" rx="24" fill="#0E1116"/>
+
+  <text x="64" y="72" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="34" font-weight="700" fill="#ECE8E1">Anatomy of one turn</text>
+  <text x="64" y="106" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18" fill="#7C838F">The Performer proposes. Only a validated claim becomes an immutable event.</text>
+
+  <line x1="180" y1="178" x2="180" y2="454" stroke="#232A33" stroke-width="2"/>
+
+  <g id="layer-1">
+    <circle cx="180" cy="178" r="18" fill="#151A21" stroke="#5B8DEF" stroke-width="2"/>
+    <text x="180" y="184" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700" fill="#5B8DEF">1</text>
+    <rect x="240" y="140" width="872" height="76" rx="16" fill="#151A21" stroke="#232A33"/>
+    <rect x="240" y="140" width="4" height="76" rx="2" fill="#5B8DEF"/>
+    <text x="272" y="173" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="24" font-weight="600" fill="#ECE8E1">Intent Router</text>
+    <text x="272" y="199" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18" fill="#8B9099">Pure function. Assigns a lane. Never calls a provider.</text>
+    <text x="1088" y="181" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">no model</text>
+  </g>
+
+  <g id="layer-2">
+    <circle cx="180" cy="270" r="18" fill="#151A21" stroke="#5B8DEF" stroke-width="2"/>
+    <text x="180" y="276" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700" fill="#5B8DEF">2</text>
+    <rect x="240" y="232" width="872" height="76" rx="16" fill="#151A21" stroke="#232A33"/>
+    <rect x="240" y="232" width="4" height="76" rx="2" fill="#5B8DEF"/>
+    <text x="272" y="265" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="24" font-weight="600" fill="#ECE8E1">Director</text>
+    <text x="272" y="291" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18" fill="#8B9099">Runs every turn. Lanes 1 and 2 record intent; lanes 3 and 4 plan and gate on approval.</text>
+    <text x="1088" y="273" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">every turn</text>
+  </g>
+
+  <g id="layer-3">
+    <circle cx="180" cy="362" r="18" fill="#151A21" stroke="#E0A458" stroke-width="2"/>
+    <text x="180" y="368" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700" fill="#E0A458">3</text>
+    <rect x="240" y="324" width="872" height="76" rx="16" fill="#151A21" stroke="#232A33"/>
+    <rect x="240" y="324" width="4" height="76" rx="2" fill="#E0A458"/>
+    <text x="272" y="357" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="24" font-weight="600" fill="#ECE8E1">Performer</text>
+    <text x="272" y="383" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18" fill="#8B9099">Writes one turn of prose. Proposes events; it never commits them.</text>
+    <text x="1088" y="365" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">model call</text>
+  </g>
+
+  <g id="layer-4">
+    <circle cx="180" cy="454" r="18" fill="#151A21" stroke="#6FCF97" stroke-width="2"/>
+    <text x="180" y="460" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700" fill="#6FCF97">4</text>
+    <rect x="240" y="416" width="872" height="76" rx="16" fill="#151A21" stroke="#232A33"/>
+    <rect x="240" y="416" width="4" height="76" rx="2" fill="#6FCF97"/>
+    <text x="272" y="449" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="24" font-weight="600" fill="#ECE8E1">Validation and commit</text>
+    <text x="272" y="475" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="18" fill="#8B9099">Participation, agency, off-stage and off-screen checks, then commit.</text>
+    <text x="1088" y="457" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7C838F">engine</text>
+  </g>
+
+  <text x="64" y="536" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#7C838F">A rejected turn is recorded as rejected. No event is committed from a failed turn.</text>
+</svg>
